@@ -1,22 +1,21 @@
+import logging
 import sqlite3
 import time
 import threading
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, CallbackContext
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, CallbackContext
 
-# Логирование
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Настраиваем логирование
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# Токен бота (замени на свой токен!)
+# Токен бота
 TOKEN = "7768038184:AAGWYf4G5cnteBnTIzGpOSFUZUSDwvigLW8"
 
-# ID администраторов (укажи свой ID и ID юриста)
-ADMIN_IDS = {321005569, 308383825}  # Можно добавить несколько ID через запятую
+# ID администраторов (юристов)
+ADMIN_IDS = [321005569, 308383825]  # Замените на список ID админов
 
 # Подключение к базе SQLite
 conn = sqlite3.connect("law_bot.db", check_same_thread=False)
@@ -38,22 +37,22 @@ with db_lock:
 
 # Часто задаваемые вопросы
 faq = {
-    "Как составить договор?": "Основные условия: стороны, предмет, цена, сроки, ответственность. Лучше проконсультироваться с юристом.",
-    "Что делать при увольнении?": "Проверьте, соответствует ли увольнение Трудовому кодексу. Можно обжаловать в суде или подать жалобу в инспекцию труда.",
-    "Как оспорить штраф?": "Подайте жалобу в ГИБДД или суд в течение 10 дней с момента получения штрафа. Обоснуйте свою позицию доказательствами.",
-    "Какие права есть у арендатора?": "Арендатор имеет право на своевременное устранение неисправностей, возврат депозита и защиту от незаконного выселения.",
-    "Как вернуть некачественный товар?": "Потребитель может вернуть товар в течение 14 дней или потребовать возврата денег при выявлении дефектов."
+    "Как составить договор?": "Важно включить основные условия: стороны, предмет, цену и сроки.",
+    "Как оспорить штраф?": "Подайте жалобу в ГИБДД или суд в течение 10 дней с доказательствами.",
+    "Как вернуть некачественный товар?": "Можно вернуть товар в течение 14 дней, если он некачественный.",
 }
 
-# Функция /start
+# Команда /start
 async def start(update: Update, context: CallbackContext) -> None:
     keyboard = [[InlineKeyboardButton(q, callback_data=q)] for q in faq.keys()]
     keyboard.append([InlineKeyboardButton("💬 Задать вопрос юристу", callback_data="ask_lawyer")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Привет! Я бот-юрист 🤖. Выберите вопрос или задайте свой:", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "Привет! Я бот-юрист 🤖. Выберите вопрос или задайте свой:", reply_markup=reply_markup
+    )
 
-# Функция обработки кнопок
+# Обработчик кнопок FAQ
 async def button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
@@ -62,32 +61,34 @@ async def button(update: Update, context: CallbackContext) -> None:
         await query.message.reply_text("✏️ Напишите свой вопрос, и юрист ответит вам в ближайшее время.")
         return
     
-    response = faq.get(query.data, "Извините, ответа на этот вопрос пока нет.")
+    response = faq.get(query.data, "Извините, ответа пока нет.")
     await query.edit_message_text(text=f"❓ {query.data}\n\n💡 {response}")
 
-# Функция получения вопросов
+# Обработка новых вопросов
 async def handle_message(update: Update, context: CallbackContext) -> None:
     user_id = update.message.chat_id
+    user_name = update.message.from_user.first_name
     question = update.message.text
     message_id = update.message.message_id
     timestamp = int(time.time())
+
+    logging.info(f"📩 Новый вопрос от {user_name} (ID: {user_id}), message_id: {message_id}")
 
     with db_lock:
         cursor.execute("INSERT INTO questions (user_id, message_id, question, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
                        (user_id, message_id, question, timestamp))
         conn.commit()
 
-    # Отправка вопроса юристу
-    for admin_id in ADMIN_IDS:
-        await context.bot.send_message(
-            chat_id=admin_id,
-            text=f"📩 *Новый вопрос от пользователя (ID: {user_id})*\n\n❓ {question}\n\nОтветьте на это сообщение, и я отправлю ответ пользователю.",
-            parse_mode="Markdown"
-        )
+    await context.bot.send_message(
+        chat_id=ADMIN_IDS[0],  # Отправляем первому администратору
+        text=f"📩 *Новый вопрос от {user_name} (ID: {user_id})*\n\n❓ {question}\n\n"
+             f"📌 Ответьте на это сообщение кнопкой 'Ответить', чтобы я отправил ответ пользователю.",
+        parse_mode="Markdown"
+    )
 
     await update.message.reply_text("✅ Ваш вопрос отправлен юристу. Ожидайте ответа.")
 
-# Функция ответа юриста
+# Обработка ответов юриста
 async def reply_to_user(update: Update, context: CallbackContext) -> None:
     """Юрист отвечает на вопрос пользователя"""
     
@@ -96,14 +97,12 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text("⚠️ У вас нет прав для выполнения этой команды.")
         return
 
-    # Проверяем, отвечает ли юрист на сообщение пользователя
     if update.message.reply_to_message:
         reply_text = update.message.text
         replied_message_id = update.message.reply_to_message.message_id
 
-        logging.info(f"🔍 Юрист отвечает на сообщение ID: {replied_message_id}. Ищем user_id в БД...")
+        logging.info(f"🔍 Юрист отвечает на сообщение ID: {replied_message_id}. Проверяем в БД...")
 
-        # Ищем ID пользователя по message_id в базе данных
         with db_lock:
             cursor.execute("SELECT user_id FROM questions WHERE message_id = ? AND status = 'pending'", (replied_message_id,))
             result = cursor.fetchone()
@@ -112,54 +111,45 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
             recipient_id = result[0]
             logging.info(f"✅ Найден user_id: {recipient_id}. Отправляем ответ...")
 
-            # Обновляем статус вопроса и сохраняем ответ юриста
             with db_lock:
                 cursor.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE user_id = ? AND message_id = ?", 
                                (reply_text, recipient_id, replied_message_id))
                 conn.commit()
 
-            # Отправляем пользователю ответ юриста
             await context.bot.send_message(chat_id=recipient_id, text=f"📩 Ответ юриста:\n\n💬 {reply_text}")
             await update.message.reply_text("✅ Ответ отправлен пользователю.")
         else:
-            logging.error(f"⚠️ Ошибка: не удалось извлечь ID пользователя из БД. message_id={replied_message_id}")
+            logging.error(f"⚠️ Ошибка: message_id={replied_message_id} НЕ НАЙДЕН в БД!")
             await update.message.reply_text("⚠️ Ошибка: не удалось найти ID пользователя для этого вопроса.")
     else:
         await update.message.reply_text("⚠️ Используйте 'Ответить' на вопрос пользователя, чтобы отправить ответ!")
 
-# Функция вывода статистики
-async def stats(update: Update, context: CallbackContext) -> None:
-    if update.message.from_user.id not in ADMIN_IDS:
-        await update.message.reply_text("⚠️ У вас нет прав для просмотра статистики.")
-        return
-
+# Команда /debug для проверки базы
+async def debug(update: Update, context: CallbackContext) -> None:
     with db_lock:
-        cursor.execute("SELECT COUNT(*) FROM questions WHERE status='pending'")
-        pending_count = cursor.fetchone()[0]
+        cursor.execute("SELECT user_id, message_id, question FROM questions WHERE status = 'pending'")
+        results = cursor.fetchall()
 
-        cursor.execute("SELECT COUNT(*) FROM questions WHERE status='answered'")
-        answered_count = cursor.fetchone()[0]
+    if results:
+        debug_text = "📋 *Debug Info:*\n"
+        for row in results:
+            debug_text += f"👤 ID: {row[0]}, 📩 message_id: {row[1]}, ❓ {row[2]}\n"
+    else:
+        debug_text = "📋 Нет сохраненных вопросов."
 
-    stats_message = (
-        f"📊 **Статистика**:\n\n"
-        f"📝 **Неотвеченных вопросов**: {pending_count}\n"
-        f"✅ **Отвеченных вопросов**: {answered_count}\n"
-    )
-
-    await update.message.reply_text(stats_message)
+    await update.message.reply_text(debug_text, parse_mode="Markdown")
 
 # Запуск бота
 def main():
-    app = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CallbackQueryHandler(button))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.REPLY & filters.TEXT, reply_to_user))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("debug", debug))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button))
+    application.add_handler(MessageHandler(filters.REPLY & filters.TEXT, reply_to_user))
 
-    print("✅ Бот запущен! Ожидание команд...")
-    app.run_polling()
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
