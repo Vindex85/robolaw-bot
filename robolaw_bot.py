@@ -115,46 +115,35 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
             cursor.execute("SELECT user_id FROM questions WHERE message_id = ?", (replied_message_id,))
             result = cursor.fetchone()
 
+        if not result:
+            logging.warning(f"⚠️ message_id={replied_message_id} НЕ НАЙДЕН в БД. Ищем по user_id...")
+            
+            with db_lock:
+                cursor.execute("SELECT user_id, message_id FROM questions WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1")
+                result = cursor.fetchone()
+
         if result:
-            recipient_id = result[0]
+            recipient_id, original_message_id = result
             logging.info(f"✅ Найден user_id: {recipient_id}. Отправляем ответ...")
 
             with db_lock:
                 cursor.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE user_id = ? AND message_id = ?", 
-                               (reply_text, recipient_id, replied_message_id))
+                               (reply_text, recipient_id, original_message_id))
                 conn.commit()
 
             await context.bot.send_message(chat_id=recipient_id, text=f"📩 Ответ юриста:\n\n💬 {reply_text}")
             await update.message.reply_text("✅ Ответ отправлен пользователю.")
         else:
-            logging.error(f"⚠️ Ошибка: message_id={replied_message_id} НЕ НАЙДЕН в БД!")
-            await update.message.reply_text("⚠️ Ошибка: не удалось найти ID пользователя для этого вопроса.")
+            logging.error(f"⚠️ Ошибка: не удалось найти ID пользователя для ответа!")
+            await update.message.reply_text("⚠️ Ошибка: не удалось найти пользователя для этого вопроса.")
     else:
         await update.message.reply_text("⚠️ Используйте 'Ответить' на вопрос пользователя, чтобы отправить ответ!")
-
-# Команда /debug для проверки базы
-async def debug(update: Update, context: CallbackContext) -> None:
-    with db_lock:
-        cursor.execute("SELECT user_id, message_id, question FROM questions WHERE status = 'pending'")
-        results = cursor.fetchall()
-
-    if results:
-        debug_text = "📋 Debug Info:\n"
-        for row in results:
-            debug_text += f"👤 ID: {row[0]}, 📩 message_id: {row[1]}, ❓ {row[2]}\n"
-    else:
-        debug_text = "📋 Нет сохраненных вопросов."
-
-    await update.message.reply_text(debug_text)
 
 # Запуск бота
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("debug", debug))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT, reply_to_user))
 
     application.run_polling()
