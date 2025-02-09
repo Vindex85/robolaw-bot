@@ -89,32 +89,39 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
 # Функция ответа юриста
 async def reply_to_user(update: Update, context: CallbackContext) -> None:
-    if update.message.from_user.id not in ADMIN_IDS:
+    """Юрист отвечает на вопрос пользователя"""
+    
+    user_id = update.message.from_user.id
+    if user_id not in ADMIN_IDS:
         await update.message.reply_text("⚠️ У вас нет прав для выполнения этой команды.")
         return
 
+    # Проверяем, отвечает ли юрист на сообщение пользователя
     if update.message.reply_to_message:
-        answer_text = update.message.text
-        replied_message = update.message.reply_to_message.text
+        reply_text = update.message.text
+        replied_message_id = update.message.reply_to_message.message_id
 
+        # Ищем ID пользователя по message_id в базе данных
         with db_lock:
-            cursor.execute("SELECT user_id FROM questions WHERE question = ? AND status='pending'", (replied_message,))
-            user_id = cursor.fetchone()
+            cursor.execute("SELECT user_id FROM questions WHERE message_id = ? AND status = 'pending'", (replied_message_id,))
+            result = cursor.fetchone()
 
-        if user_id:
-            user_id = user_id[0]
+        if result:
+            recipient_id = result[0]
 
+            # Обновляем статус вопроса и сохраняем ответ юриста
             with db_lock:
-                cursor.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE user_id = ? AND question = ?",
-                               (answer_text, user_id, replied_message))
+                cursor.execute("UPDATE questions SET answer = ?, status = 'answered' WHERE user_id = ? AND message_id = ?", 
+                               (reply_text, recipient_id, replied_message_id))
                 conn.commit()
 
-            await context.bot.send_message(chat_id=user_id, text=f"📩 Ответ юриста:\n\n💬 {answer_text}")
+            # Отправляем пользователю ответ юриста
+            await context.bot.send_message(chat_id=recipient_id, text=f"📩 Ответ юриста:\n\n💬 {reply_text}")
             await update.message.reply_text("✅ Ответ отправлен пользователю.")
         else:
-            await update.message.reply_text("⚠️ Ошибка: не удалось найти пользователя.")
+            await update.message.reply_text("⚠️ Ошибка: не удалось найти ID пользователя для этого вопроса.")
     else:
-        await update.message.reply_text("⚠️ Отвечайте на сообщение с вопросом пользователя!")
+        await update.message.reply_text("⚠️ Используйте 'Ответить' на вопрос пользователя, чтобы отправить ответ!")
 
 # Функция вывода статистики
 async def stats(update: Update, context: CallbackContext) -> None:
