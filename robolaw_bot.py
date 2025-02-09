@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Токен бота (замени на свой токен!)
-TOKEN = "ТВОЙ_ТОКЕН_ОТ_BOTFATHER"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # ID администраторов (укажи свой ID и ID юриста)
 ADMIN_IDS = {321005569, 308383825}  # Можно добавить несколько ID через запятую
