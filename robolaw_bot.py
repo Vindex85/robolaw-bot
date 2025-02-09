@@ -6,9 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, CallbackContext
 
 # Логирование
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Токен бота
@@ -111,7 +109,7 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
         logging.info(f"🔍 Юрист отвечает на сообщение ID: {replied_message_id}. Проверяем в БД...")
 
         with db_lock:
-            cursor.execute("SELECT user_id FROM questions WHERE message_id = ? AND status = 'pending'", (replied_message_id,))
+            cursor.execute("SELECT user_id FROM questions WHERE message_id = ?", (replied_message_id,))
             result = cursor.fetchone()
 
         if result:
@@ -138,13 +136,13 @@ async def debug(update: Update, context: CallbackContext) -> None:
         results = cursor.fetchall()
 
     if results:
-        debug_text = "📋 *Debug Info:*\n"
+        debug_text = "📋 Debug Info:\n"
         for row in results:
             debug_text += f"👤 ID: {row[0]}, 📩 message_id: {row[1]}, ❓ {row[2]}\n"
     else:
         debug_text = "📋 Нет сохраненных вопросов."
 
-    await update.message.reply_text(debug_text, parse_mode="Markdown")
+    await update.message.reply_text(debug_text)
 
 # Запуск бота
 def main():
