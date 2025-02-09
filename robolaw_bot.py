@@ -101,6 +101,8 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
         reply_text = update.message.text
         replied_message_id = update.message.reply_to_message.message_id
 
+        logging.info(f"🔍 Юрист отвечает на сообщение ID: {replied_message_id}. Ищем user_id в БД...")
+
         # Ищем ID пользователя по message_id в базе данных
         with db_lock:
             cursor.execute("SELECT user_id FROM questions WHERE message_id = ? AND status = 'pending'", (replied_message_id,))
@@ -108,6 +110,7 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
 
         if result:
             recipient_id = result[0]
+            logging.info(f"✅ Найден user_id: {recipient_id}. Отправляем ответ...")
 
             # Обновляем статус вопроса и сохраняем ответ юриста
             with db_lock:
@@ -119,6 +122,7 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
             await context.bot.send_message(chat_id=recipient_id, text=f"📩 Ответ юриста:\n\n💬 {reply_text}")
             await update.message.reply_text("✅ Ответ отправлен пользователю.")
         else:
+            logging.error(f"⚠️ Ошибка: не удалось извлечь ID пользователя из БД. message_id={replied_message_id}")
             await update.message.reply_text("⚠️ Ошибка: не удалось найти ID пользователя для этого вопроса.")
     else:
         await update.message.reply_text("⚠️ Используйте 'Ответить' на вопрос пользователя, чтобы отправить ответ!")
