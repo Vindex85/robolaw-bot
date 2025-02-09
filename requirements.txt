@@ -1,3 +1,4 @@
-echo python-telegram-bot > requirements.txt
-echo sqlite3 >> requirements.txt
-echo requests >> requirements.txt
+python-telegram-bot
+sqlite3
+requests
+
