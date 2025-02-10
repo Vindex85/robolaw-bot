@@ -12,7 +12,8 @@ from telegram.ext import (
     ContextTypes
 )
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+print(f"TELEGRAM_TOKEN: {TELEGRAM_TOKEN}")  # Отладочный вывод
 if not TELEGRAM_TOKEN:
     print("Ошибка: TELEGRAM_TOKEN не задан.")
 
