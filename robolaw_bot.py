@@ -85,7 +85,7 @@ def init_faqs():
             ),
             FAQ(
                 question="Как задать вопрос?",
-                answer="✅ Просто отправьте сообщение, и юрист вам ответит."
+                answer="✅ Введите команду /start и выберите «Задать вопрос»."
             ),
         ]
         db.add_all(faqs)
@@ -329,7 +329,13 @@ def main():
     application.add_handler(CommandHandler("stats", stats))
     
     # Запуск бота (на Render можно использовать webhook‑подход, здесь — polling для простоты)
-    application.run_polling()
+    application.run_webhook(
+    listen="0.0.0.0",
+    port=int(os.environ.get("PORT", 8443)),
+    url_path=TELEGRAM_TOKEN
+)
+application.bot.set_webhook(f"https://robolaw-bot.onrender.com/{TELEGRAM_TOKEN}")
+
 
 if __name__ == '__main__':
     main()
