@@ -7,6 +7,12 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import psycopg2  # Используем PostgreSQL вместо SQLite
 from psycopg2.extras import RealDictCursor
 
+# Подключение к PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+cur = conn.cursor(cursor_factory=DictCursor)
+
 # Логирование
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -118,6 +124,13 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
 
     await update.message.reply_text("✅ Ваш вопрос отправлен юристу. Ожидайте ответа.")
 
+def save_question(user_id, message_id, question_text):
+    with conn:
+        cur.execute("""
+            INSERT INTO questions (user_id, message_id, question)
+            VALUES (%s, %s, %s);
+        """, (user_id, message_id, question_text))
+
 # Обработка ответов юриста
 async def reply_to_user(update: Update, context: CallbackContext) -> None:
     """Юрист отвечает на вопрос пользователя"""
@@ -168,6 +181,44 @@ async def reply_to_user(update: Update, context: CallbackContext) -> None:
     else:
         await update.message.reply_text("⚠️ Используйте 'Ответить' на вопрос пользователя, чтобы отправить ответ!")
 
+def save_answer(question_id, user_id, answer_text):
+    with conn:
+        cur.execute("""
+            INSERT INTO answers (question_id, user_id, answer)
+            VALUES (%s, %s, %s);
+        """, (question_id, user_id, answer_text))
+
+def update_statistics(user_id, is_question=True):
+    with conn:
+        if is_question:
+            cur.execute("""
+                INSERT INTO statistics (user_id, questions_asked)
+                VALUES (%s, 1)
+                ON CONFLICT (user_id) DO UPDATE
+                SET questions_asked = statistics.questions_asked + 1;
+            """, (user_id,))
+        else:
+            cur.execute("""
+                INSERT INTO statistics (user_id, answers_given)
+                VALUES (%s, 1)
+                ON CONFLICT (user_id) DO UPDATE
+                SET answers_given = statistics.answers_given + 1;
+            """, (user_id,))
+async def show_stats(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    cur.execute("SELECT questions_asked, answers_given FROM statistics WHERE user_id = %s", (user_id,))
+    stats = cur.fetchone()
+
+    if stats:
+        await update.message.reply_text(
+            f"📊 Ваша статистика:\n"
+            f"❓ Вопросов задано: {stats['questions_asked']}\n"
+            f"💬 Ответов дано: {stats['answers_given']}"
+        )
+    else:
+        await update.message.reply_text("📊 У вас пока нет статистики.")
+
+
 # Запуск бота
 def main():
     if not TOKEN:
@@ -177,9 +228,43 @@ def main():
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("stats", show_stats))
     application.add_handler(CallbackQueryHandler(button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler(filters.REPLY & filters.TEXT, reply_to_user))
+
+    def create_tables():
+    with conn:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS questions (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                question TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS answers (
+                id SERIAL PRIMARY KEY,
+                question_id INT REFERENCES questions(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL,
+                answer TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS statistics (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                questions_asked INT DEFAULT 0,
+                answers_given INT DEFAULT 0
+            );
+        """)
+
+create_tables()
 
     application.run_polling()
 
