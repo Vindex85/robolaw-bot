@@ -329,55 +329,7 @@ def main():
     application.add_handler(CommandHandler("stats", stats))
     
     # Запуск бота (на Render можно использовать webhook‑подход, здесь — polling для простоты)
-    def main():
-    token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        logger.error("TELEGRAM_TOKEN не задан в переменных окружения.")
-        return
-
-    application = Application.builder().token(token).build()
-    
-    # Обработчик команды /start
-    application.add_handler(CommandHandler("start", start))
-    
-    # ConversationHandler для процесса "Задать вопрос"
-    conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler, pattern="^ask_question$")],
-        states={USER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_user_question)]},
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-    application.add_handler(conv_handler)
-    
-    # Обработчик для всех callback-запросов (FAQ, навигация и т.д.)
-    application.add_handler(CallbackQueryHandler(button_handler))
-    
-    # Команда для админов: просмотр списка новых вопросов
-    application.add_handler(CommandHandler("questions", list_questions))
-    
-    # ConversationHandler для ответа на вопрос (команда /answer)
-    admin_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("answer", admin_answer_start)],
-        states={
-            ADMIN_SELECT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_select_question)],
-            ADMIN_ENTER_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_enter_answer)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-    application.add_handler(admin_conv_handler)
-    
-    # Команда для просмотра статистики (только для админов)
-    application.add_handler(CommandHandler("stats", stats))
-    
-    # Устанавливаем webhook
-    webhook_url = f"https://robolaw-bot.onrender.com/{TELEGRAM_TOKEN}"
-    application.bot.set_webhook(webhook_url)
-    
-    # Запускаем webhook-сервер
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        url_path=TELEGRAM_TOKEN
-    )
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
