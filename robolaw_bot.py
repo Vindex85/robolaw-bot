@@ -27,7 +27,7 @@ def close_db_connection():
 
 atexit.register(close_db_connection)
 
-# Создание таблиц, если их нет
+# Создание таблиц
 def create_tables():
     try:
         with conn:
@@ -68,85 +68,51 @@ FAQ = {
     "Как составить договор?": "✅ Включите в договор:\n- Стороны\n- Предмет\n- Цена\n- Сроки\n- Ответственность сторон\nЛучше проконсультироваться с юристом.",
     "Что делать при увольнении?": "✅ Проверьте, соответствует ли увольнение Трудовому кодексу. Можно обжаловать в суде или подать жалобу в инспекцию труда.",
     "Как оспорить штраф?": "✅ Подайте жалобу в ГИБДД или суд в течение 10 дней с момента получения штрафа.",
-    "Какие права есть у арендатора?": "✅ Арендатор имеет право на:\n- Своевременное устранение неисправностей\n- Возврат депозита\n- Защиту от незаконного выселения.",
-    "Как вернуть некачественный товар?": "✅ Вы можете вернуть товар в течение 14 дней. Если обнаружен брак – можно требовать возврат денег или обмен.",
-    "Как задать вопрос?": "✅ Просто отправьте сообщение, и юрист вам ответит.",
-    "Сколько стоит консультация?": "✅ Первая консультация бесплатна, дальнейшие услуги обсуждаются с юристом.",
-    "Как долго ждать ответа?": "✅ Ответ поступит в течение нескольких часов, в зависимости от загруженности юристов."
 }
 
 # Функция для сохранения вопросов
 def save_question(user_id, message_id, question_text):
     try:
-        with conn:
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute("""
-                    INSERT INTO questions (user_id, message_id, question)
-                    VALUES (%s, %s, %s);
-                """, (user_id, message_id, question_text))
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("""
+                INSERT INTO questions (user_id, message_id, question)
+                VALUES (%s, %s, %s);
+            """, (user_id, message_id, question_text))
+            conn.commit()
     except psycopg2.Error as e:
         logger.error(f"Ошибка при сохранении вопроса: {e}")
+
+ADMINS = [308383825, 321005569]  # ID админов
+
+async def handle_message(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+    message_id = update.message.message_id
+    question_text = update.message.text
+
+    save_question(user_id, message_id, question_text)
+    await update.message.reply_text("✅ Ваш вопрос сохранен. Ожидайте ответа.")
+
+    # Уведомление админам
+    for admin_id in ADMINS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=f"📩 Новый вопрос от {update.message.from_user.first_name} (ID: {user_id}):\n\n❓ {question_text}"
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления админу {admin_id}: {e}")
 
 # Функция для сохранения ответов
 def save_answer(question_id, user_id, answer_text):
     try:
-        with conn:
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute("""
-                    INSERT INTO answers (question_id, user_id, answer)
-                    VALUES (%s, %s, %s);
-                """, (question_id, user_id, answer_text))
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("""
+                INSERT INTO answers (question_id, user_id, answer)
+                VALUES (%s, %s, %s);
+            """, (question_id, user_id, answer_text))
+            conn.commit()
     except psycopg2.Error as e:
         logger.error(f"Ошибка при сохранении ответа: {e}")
-
-# Обновление статистики
-def update_statistics(user_id, is_question=True):
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                if is_question:
-                    cur.execute("""
-                        INSERT INTO statistics (user_id, questions_asked)
-                        VALUES (%s, 1)
-                        ON CONFLICT (user_id) DO UPDATE
-                        SET questions_asked = statistics.questions_asked + 1;
-                    """, (user_id,))
-                else:
-                    cur.execute("""
-                        INSERT INTO statistics (user_id, answers_given)
-                        VALUES (%s, 1)
-                        ON CONFLICT (user_id) DO UPDATE
-                        SET answers_given = statistics.answers_given + 1;
-                    """, (user_id,))
-    except psycopg2.Error as e:
-        logger.error(f"Ошибка при обновлении статистики: {e}")
-
-# Обработчик команды /start
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text(
-        "Привет! Я бот-юрист. Чем могу помочь?\n"
-        "Используйте команду /faq для просмотра часто задаваемых вопросов."
-    )
-
-# Обработчик команды /stats
-async def show_stats(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT questions_asked, answers_given FROM statistics WHERE user_id = %s", (user_id,))
-            stats = cur.fetchone()
-
-        if stats:
-            await update.message.reply_text(
-                f"📊 Ваша статистика:\n"
-                f"❓ Вопросов задано: {stats['questions_asked']}\n"
-                f"💬 Ответов дано: {stats['answers_given']}"
-            )
-        else:
-            await update.message.reply_text("📊 У вас пока нет статистики.")
-    except psycopg2.Error as e:
-        logger.error(f"Ошибка при получении статистики: {e}")
-        await update.message.reply_text("⚠️ Произошла ошибка при получении статистики.")
 
 # Обработчик команды /faq
 async def show_faq(update: Update, context: CallbackContext):
@@ -161,14 +127,44 @@ async def faq_callback(update: Update, context: CallbackContext):
     answer = FAQ.get(query.data, "Ответ не найден.")
     await query.message.reply_text(f"❓ {query.data}\n\n💡 {answer}")
 
-# Обработчик текстовых сообщений
-async def handle_message(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    message_id = update.message.message_id
-    question_text = update.message.text
+# Обработчик команды /start с кнопкой
+async def start(update: Update, context: CallbackContext):
+    keyboard = [[InlineKeyboardButton("📜 Частые вопросы", callback_data="faq")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    save_question(user_id, message_id, question_text)
-    await update.message.reply_text("✅ Ваш вопрос сохранен. Ожидайте ответа.")
+    await update.message.reply_text(
+        "Привет! Я бот-юрист. Чем могу помочь?\n"
+        "Вы можете задать свой вопрос или воспользоваться кнопками ниже.",
+        reply_markup=reply_markup
+    )
+
+# Обработчик команды /stats (только для админов)
+async def show_stats(update: Update, context: CallbackContext):
+    user_id = update.message.from_user.id
+
+    if user_id not in ADMINS:
+        await update.message.reply_text("🚫 У вас нет доступа к этой команде.")
+        return
+
+    try:
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("""
+                SELECT user_id, questions_asked, answers_given 
+                FROM statistics
+                ORDER BY questions_asked DESC;
+            """)
+            stats = cur.fetchall()
+
+        if stats:
+            stats_text = "📊 Статистика пользователей:\n\n"
+            for row in stats:
+                stats_text += f"👤 ID {row['user_id']}: ❓ {row['questions_asked']} | 💬 {row['answers_given']}\n"
+            await update.message.reply_text(stats_text)
+        else:
+            await update.message.reply_text("📊 В базе пока нет статистики.")
+    except psycopg2.Error as e:
+        logger.error(f"Ошибка при получении статистики: {e}")
+        await update.message.reply_text("⚠️ Произошла ошибка при получении статистики.")
 
 # Обработчик ответов на сообщения
 async def handle_reply(update: Update, context: CallbackContext):
@@ -193,7 +189,7 @@ async def handle_reply(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("⚠️ Пожалуйста, ответьте на сообщение с вопросом.")
 
-# Основной код бота
+# Запуск бота
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 if not TOKEN:
     logger.error("Токен бота не найден. Убедитесь, что переменная окружения TELEGRAM_BOT_TOKEN установлена.")
