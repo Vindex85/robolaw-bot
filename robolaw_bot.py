@@ -1,201 +1,330 @@
-import os
-import psycopg2
-from psycopg2.extras import DictCursor
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 import logging
-import atexit
+import os
+import datetime
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    filters,
+    ConversationHandler,
+    ContextTypes
+)
 
-# Логирование
+# SQLAlchemy для работы с БД
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Text, DateTime
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+# Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Подключение к PostgreSQL
-DATABASE_URL = os.getenv("DATABASE_URL")
-ADMINS = [308383825, 321005569]  # ID админов
+# ============================================================================
+# Настройка подключения к базе данных
+# Если переменная окружения DATABASE_URL не задана, используется SQLite (для тестирования)
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///db.sqlite3")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-cur = conn.cursor(cursor_factory=DictCursor)
+# Модели базы данных
 
-# Закрытие соединения при завершении работы
-def close_db_connection():
-    cur.close()
-    conn.close()
-    logger.info("Соединение с базой данных закрыто.")
+class FAQ(Base):
+    __tablename__ = 'faqs'
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
 
-atexit.register(close_db_connection)
+class UserQuestion(Base):
+    __tablename__ = 'user_questions'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(BigInteger, nullable=False)
+    question_text = Column(Text, nullable=False)
+    answer_text = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-# Создание таблиц
-def create_tables():
-    try:
-        with conn:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS questions (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL,
-                    message_id BIGINT NOT NULL,
-                    question TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
+class EventLog(Base):
+    __tablename__ = 'event_logs'
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String(50), nullable=False)  # например: "start", "faq_access", "user_question", "admin_answer"
+    user_id = Column(BigInteger, nullable=True)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS answers (
-                    id SERIAL PRIMARY KEY,
-                    question_id INT REFERENCES questions(id) ON DELETE CASCADE,
-                    user_id BIGINT NOT NULL,
-                    answer TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-    except psycopg2.Error as e:
-        logger.error(f"Ошибка при создании таблиц: {e}")
+# Создаем таблицы, если их нет
+Base.metadata.create_all(bind=engine)
 
-create_tables()
+# Функция инициализации FAQ (если таблица пуста, добавляем 5 вопросов)
+def init_faqs():
+    db = SessionLocal()
+    if db.query(FAQ).count() == 0:
+        faqs = [
+            FAQ(
+                question="Как составить договор?",
+                answer="✅ Включите в договор:\n- Стороны\n- Предмет\n- Цена\n- Сроки\n- Ответственность сторон\nЛучше проконсультироваться с юристом."
+            ),
+            FAQ(
+                question="Что делать при увольнении?",
+                answer="✅ Проверьте, соответствует ли увольнение Трудовому кодексу. Можно обжаловать в суде или подать жалобу в инспекцию труда."
+            ),
+            FAQ(
+                question="Как оспорить штраф?",
+                answer="✅ Подайте жалобу в ГИБДД или суд в течение 10 дней с момента получения штрафа."
+            ),
+            FAQ(
+                question="Как вернуть некачественный товар?",
+                answer="✅ Вы можете вернуть товар в течение 14 дней. Если обнаружен брак – можно требовать возврат денег или обмен."
+            ),
+            FAQ(
+                question="Как задать вопрос?",
+                answer="✅ Просто отправьте сообщение, и юрист вам ответит."
+            ),
+        ]
+        db.add_all(faqs)
+        db.commit()
+    db.close()
 
-# Часто задаваемые вопросы (FAQ)
-FAQ = {
-    "Как составить договор?": "✅ Включите в договор:\n- Стороны\n- Предмет\n- Цена\n- Сроки\n- Ответственность сторон\nЛучше проконсультироваться с юристом.",
-    "Что делать при увольнении?": "✅ Проверьте, соответствует ли увольнение Трудовому кодексу. Можно обжаловать в суде или подать жалобу в инспекцию труда.",
-    "Как оспорить штраф?": "✅ Подайте жалобу в ГИБДД или суд в течение 10 дней с момента получения штрафа.",
-    "Какие права есть у арендатора?": "✅ Арендатор имеет право на:\n- Своевременное устранение неисправностей\n- Возврат депозита\n- Защиту от незаконного выселения.",
-    "Как вернуть некачественный товар?": "✅ Вы можете вернуть товар в течение 14 дней. Если обнаружен брак – можно требовать возврат денег или обмен.",
-    "Как задать вопрос?": "✅ Просто отправьте сообщение, и юрист вам ответит.",
-    "Сколько стоит консультация?": "✅ Первая консультация бесплатна, дальнейшие услуги обсуждаются с юристом.",
-    "Как долго ждать ответа?": "✅ Ответ поступит в течение нескольких часов, в зависимости от загруженности юристов."
-}
+init_faqs()
 
-# Функция для сохранения вопросов
-def save_question(user_id, message_id, question_text):
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("""
-                INSERT INTO questions (user_id, message_id, question)
-                VALUES (%s, %s, %s);
-            """, (user_id, message_id, question_text))
-            conn.commit()
-    except psycopg2.Error as e:
-        logger.error(f"Ошибка при сохранении вопроса: {e}")
+# ============================================================================
+# Список администраторов (замените примерное значение на реальные Telegram-ID)
+ADMIN_IDS = [308383825, 321005569]
 
-# Функция для сохранения ответов
-def save_answer(question_id, user_id, answer_text):
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("""
-                INSERT INTO answers (question_id, user_id, answer)
-                VALUES (%s, %s, %s);
-            """, (question_id, user_id, answer_text))
-            conn.commit()
-    except psycopg2.Error as e:
-        logger.error(f"Ошибка при сохранении ответа: {e}")
+# Состояния для ConversationHandler
+USER_QUESTION = 1
+ADMIN_SELECT_QUESTION = 2
+ADMIN_ENTER_ANSWER = 3
 
-# Обработчик команды /start
-async def start(update: Update, context: CallbackContext):
-    keyboard = [[InlineKeyboardButton("📜 Частые вопросы", callback_data="faq")]]
+# ============================================================================
+# Обработчик команды /start: отправляет сообщение с кнопками (FAQ и "Задать вопрос")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    # Логируем событие запуска бота
+    db = SessionLocal()
+    db.add(EventLog(event_type="start", user_id=user.id))
+    db.commit()
+    db.close()
+    
+    keyboard = [
+        [InlineKeyboardButton("FAQ", callback_data="show_faq")],
+        [InlineKeyboardButton("Задать вопрос", callback_data="ask_question")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    # Отправляем приветственное сообщение с inline‑клавиатурой
     await update.message.reply_text(
-        "Привет! Я бот-юрист. Чем могу помочь?\n"
-        "Вы можете задать свой вопрос или воспользоваться кнопками ниже.",
+        "Добро пожаловать! Я робот-юрист!\nВыберите опцию:",
         reply_markup=reply_markup
     )
 
-# Обработчик кнопок FAQ
-async def faq_callback(update: Update, context: CallbackContext):
+# ============================================================================
+# Универсальный обработчик callback-запросов (для кнопок FAQ, задать вопрос, навигации)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    answer = FAQ.get(query.data)
-    
-    if answer:
-        await query.edit_message_text(
-            text=f"❓ *Вопрос:* {query.data}\n\n💡 *Ответ:* {answer}",
-            parse_mode="Markdown"
-        )
-    else:
-        await query.message.reply_text("⚠️ Ответ не найден. Попробуйте выбрать вопрос из списка.")
+    data = query.data
+    db = SessionLocal()
 
-# Обработчик текстовых сообщений
-async def handle_message(update: Update, context: CallbackContext):
-    if update.message.from_user.id in ADMINS:
-        return
-        
-    user_id = update.message.from_user.id
-    message_id = update.message.message_id
+    if data == "show_faq":
+        # Логируем событие просмотра FAQ
+        db.add(EventLog(event_type="faq_access", user_id=query.from_user.id))
+        db.commit()
+        # Получаем список FAQ из БД
+        faqs = db.query(FAQ).all()
+        keyboard = []
+        for faq in faqs:
+            keyboard.append([InlineKeyboardButton(faq.question, callback_data=f"faq_{faq.id}")])
+        keyboard.append([InlineKeyboardButton("Назад", callback_data="back_to_start")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Выберите вопрос:", reply_markup=reply_markup)
+    elif data.startswith("faq_"):
+        # Если нажата кнопка с конкретным FAQ (например, faq_3)
+        faq_id = int(data.split("_")[1])
+        faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
+        if faq:
+            text = f"Вопрос: {faq.question}\n\nОтвет: {faq.answer}"
+            await query.edit_message_text(text)
+    elif data == "ask_question":
+        # Запускаем разговор для ввода вопроса
+        await query.edit_message_text("Пожалуйста, введите ваш вопрос:")
+        db.close()
+        return USER_QUESTION  # переключаемся в состояние ожидания вопроса
+    elif data == "back_to_start":
+        # Возврат к начальному меню
+        keyboard = [
+            [InlineKeyboardButton("FAQ", callback_data="show_faq")],
+            [InlineKeyboardButton("Задать вопрос", callback_data="ask_question")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Добро пожаловать в юридический чат-бот!\nВыберите опцию:", reply_markup=reply_markup)
+    db.close()
+    return ConversationHandler.END
+
+# ============================================================================
+# Обработка текста, введённого пользователем в ходе разговора (задание вопроса)
+async def receive_user_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     question_text = update.message.text
+    db = SessionLocal()
+    new_question = UserQuestion(user_id=user.id, question_text=question_text)
+    db.add(new_question)
+    db.commit()
+    # Логируем событие вопроса пользователя
+    db.add(EventLog(event_type="user_question", user_id=user.id))
+    db.commit()
+    db.close()
+    await update.message.reply_text("Ваш вопрос отправлен. Ожидайте ответа от юриста.")
+    return ConversationHandler.END
 
-    save_question(user_id, message_id, question_text)
-    await update.message.reply_text("✅ Ваш вопрос сохранен. Ожидайте ответа.")
+# Функция для отмены разговора
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Операция отменена.")
+    return ConversationHandler.END
 
-    # Уведомление админам
-    for admin_id in ADMINS:
+# ============================================================================
+# Команда для администраторов: выводит список новых (неотвеченных) вопросов
+async def list_questions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("У вас нет прав для выполнения этой команды.")
+        return
+    db = SessionLocal()
+    questions = db.query(UserQuestion).filter(UserQuestion.answer_text == None).all()
+    if not questions:
+        await update.message.reply_text("Нет новых вопросов.")
+    else:
+        message = "Новые вопросы:\n"
+        for q in questions:
+            message += f"ID: {q.id} | Вопрос: {q.question_text}\n"
+        await update.message.reply_text(message)
+    db.close()
+
+# ============================================================================
+# Администраторский разговор для ответа на вопрос пользователя.
+# Шаг 1: команда /answer – ввод ID вопроса
+async def admin_answer_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("У вас нет прав для выполнения этой команды.")
+        return ConversationHandler.END
+    await update.message.reply_text("Введите ID вопроса, на который хотите ответить:")
+    return ADMIN_SELECT_QUESTION
+
+# Шаг 2: получение ID вопроса и запрос ответа
+async def admin_select_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        question_id = int(update.message.text)
+    except ValueError:
+        await update.message.reply_text("Пожалуйста, введите корректный числовой ID вопроса:")
+        return ADMIN_SELECT_QUESTION
+    db = SessionLocal()
+    question = db.query(UserQuestion).filter(UserQuestion.id == question_id).first()
+    if not question:
+        await update.message.reply_text("Вопрос с таким ID не найден. Попробуйте еще раз:")
+        db.close()
+        return ADMIN_SELECT_QUESTION
+    context.user_data["question_id"] = question_id
+    await update.message.reply_text(f"Вопрос: {question.question_text}\nВведите ваш ответ:")
+    db.close()
+    return ADMIN_ENTER_ANSWER
+
+# Шаг 3: получение ответа и отправка его пользователю
+async def admin_enter_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer_text = update.message.text
+    question_id = context.user_data.get("question_id")
+    db = SessionLocal()
+    question = db.query(UserQuestion).filter(UserQuestion.id == question_id).first()
+    if question:
+        question.answer_text = answer_text
+        db.commit()
+        # Отправляем ответ пользователю (если бот может написать пользователю)
         try:
             await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"📩 Новый вопрос от {update.message.from_user.first_name} (ID: {user_id}):\n\n❓ {question_text}"
+                chat_id=question.user_id,
+                text=f"На ваш вопрос:\n{question.question_text}\n\nдан ответ:\n{answer_text}"
             )
         except Exception as e:
-            logger.error(f"Ошибка при отправке уведомления админу {admin_id}: {e}")
+            logger.error(f"Ошибка отправки сообщения пользователю {question.user_id}: {e}")
+        db.add(EventLog(event_type="admin_answer", user_id=update.effective_user.id))
+        db.commit()
+        await update.message.reply_text("Ответ отправлен пользователю.")
+    else:
+        await update.message.reply_text("Ошибка: вопрос не найден.")
+    db.close()
+    return ConversationHandler.END
 
-# Обработчик ответов на сообщения
-async def handle_reply(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    
-    if user_id not in ADMINS:
-        await update.message.reply_text("⚠️ Эта команда доступна только администраторам.")
+# ============================================================================
+# Команда для просмотра статистики (только для администраторов)
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in ADMIN_IDS:
+        await update.message.reply_text("У вас нет прав для выполнения этой команды.")
+        return
+    db = SessionLocal()
+    start_count = db.query(EventLog).filter(EventLog.event_type == "start").count()
+    faq_count = db.query(EventLog).filter(EventLog.event_type == "faq_access").count()
+    user_questions_count = db.query(UserQuestion).count()
+    answered_questions_count = db.query(UserQuestion).filter(UserQuestion.answer_text != None).count()
+    admin_answers_count = db.query(EventLog).filter(EventLog.event_type == "admin_answer").count()
+    message = (
+        f"Статистика:\n"
+        f"Запусков бота (/start): {start_count}\n"
+        f"Просмотров FAQ: {faq_count}\n"
+        f"Всего вопросов пользователей: {user_questions_count}\n"
+        f"Ответов юристов: {answered_questions_count}\n"
+        f"Действий админов (ответов): {admin_answers_count}"
+    )
+    await update.message.reply_text(message)
+    db.close()
+
+# ============================================================================
+# Основная функция запуска бота
+def main():
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if not token:
+        logger.error("TELEGRAM_TOKEN не задан в переменных окружения.")
         return
 
-    if update.message.reply_to_message:
-        try:
-            original_message = update.message.reply_to_message
-            original_message_id = original_message.message_id
-            
-            with conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute("""
-                    SELECT id, user_id, question 
-                    FROM questions 
-                    WHERE message_id = %s
-                """, (original_message_id,))
-                question = cur.fetchone()
+    application = Application.builder().token(token).build()
+    
+    # Обработчик команды /start
+    application.add_handler(CommandHandler("start", start))
+    
+    # ConversationHandler для процесса "Задать вопрос"
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(button_handler, pattern="^ask_question$")],
+        states={
+            USER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_user_question)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    application.add_handler(conv_handler)
+    
+    # Обработчик для всех callback‑запросов (FAQ, навигация и т.д.)
+    application.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Команда для админов: просмотр списка новых вопросов
+    application.add_handler(CommandHandler("questions", list_questions))
+    
+    # ConversationHandler для ответа на вопрос (команда /answer)
+    admin_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("answer", admin_answer_start)],
+        states={
+            ADMIN_SELECT_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_select_question)],
+            ADMIN_ENTER_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_enter_answer)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    application.add_handler(admin_conv_handler)
+    
+    # Команда для просмотра статистики (только для админов)
+    application.add_handler(CommandHandler("stats", stats))
+    
+    # Запуск бота (на Render можно использовать webhook‑подход, здесь — polling для простоты)
+    application.run_polling()
 
-            if question:
-                save_answer(question['id'], user_id, update.message.text)
-                
-                await context.bot.send_message(
-                    chat_id=question['user_id'],
-                    text=f"📩 *Ответ юриста:*\n\n{update.message.text}",
-                    parse_mode="Markdown"
-                )
-                
-                await update.message.reply_text("✅ Ответ успешно отправлен пользователю.")
-                
-                await context.bot.delete_message(
-                    chat_id=update.message.chat_id,
-                    message_id=original_message_id
-                )
-            else:
-                await update.message.reply_text("⚠️ Вопрос не найден в базе данных.")
-                
-        except Exception as e:
-            logger.error(f"Ошибка обработки ответа: {str(e)}")
-            await update.message.reply_text("❌ Произошла ошибка при обработке ответа.")
-    else:
-        await update.message.reply_text("ℹ️ Пожалуйста, отвечайте непосредственно на сообщение с вопросом.")
-
-# Запуск бота
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-if not TOKEN:
-    logger.error("Токен бота не найден. Убедитесь, что переменная окружения TELEGRAM_BOT_TOKEN установлена.")
-    exit(1)
-
-application = Application.builder().token(TOKEN).build()
-
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(faq_callback))
-application.add_handler(MessageHandler(filters.REPLY & filters.TEXT, handle_reply))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.REPLY, handle_message))
-
-logger.info("Бот запущен...")
-application.run_polling()
+if __name__ == '__main__':
+    main()
