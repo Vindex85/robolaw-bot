@@ -12,6 +12,10 @@ from telegram.ext import (
     ContextTypes
 )
 
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    print("Ошибка: TELEGRAM_TOKEN не задан.")
+
 # SQLAlchemy для работы с БД
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, Text, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
