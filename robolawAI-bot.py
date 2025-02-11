@@ -1,17 +1,18 @@
 import asyncio
 import logging
 import asyncpg
-from dotenv import load_dotenv
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
 from aiogram.filters import Command
 from openai import OpenAI
+from dotenv import load_dotenv
 
+# Настройки
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DATABASE_URL = os.getenv("POSTGRESQL_DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ADMIN_IDS = {308383825, 321005569}  # ID администраторов
 LAWYER_PHONE = "+7(999)916-04-83"
@@ -57,25 +58,25 @@ async def get_ai_response(question: str):
 
 @dp.message(Command("start"))
 async def start(message: Message):
-    await message.answer("Привет! Я робот-юрист, отвечаю на ваши вопросы.")
+    await message.answer("Привет! Я юридический бот. Задайте мне ваш вопрос.")
 
 @dp.message()
 async def handle_question(message: Message):
     user_id = message.from_user.id
     question_count = await get_question_count(user_id)
-    
+
     if question_count >= 3:
         await message.answer(f"Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
         return
-    
+
     answer = await get_ai_response(message.text)
     await update_question_count(user_id)
     await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
 
 async def main():
     await init_db()
-    dp.run_polling(bot)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # Здесь вызываем start_polling без использования asyncio.run(), так как aiogram сам управляет циклом событий
     asyncio.run(main())
