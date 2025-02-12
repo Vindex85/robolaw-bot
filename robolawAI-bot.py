@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import Text
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -88,7 +89,6 @@ async def send_welcome(message: Message):
     await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов).")
 
 # Обработчик текстовых сообщений
-@dp.message_handler()
 async def handle_question(message: Message):
     user_id = message.from_user.id
     question = message.text
