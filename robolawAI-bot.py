@@ -47,7 +47,7 @@ async def update_question_count(user_id: int):
 
 async def get_ai_response(question: str):
     response = client.completions.create(
-        model="gpt-4",
+        model="gpt-3.5-turbo",
         prompt=f"Юридический вопрос: {question}\nОтвет:",
         max_tokens=200
     )
