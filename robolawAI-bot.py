@@ -32,9 +32,9 @@ client = OpenAI(
 )
 
 # Функция запроса к Bothub API
-async def get_ai_response(prompt):
+def get_ai_response(prompt):
     try:
-        # Асинхронный запрос для генерации текста с потоком
+        # Синхронный запрос для генерации текста с потоком
         stream = client.chat.completions.create(
             model="gpt-4o-mini-2024-07-18",
             messages=[{"role": "user", "content": prompt}],
@@ -42,8 +42,8 @@ async def get_ai_response(prompt):
         )
 
         response = ""
-        # Потоковая обработка данных
-        async for chunk in stream:
+        # Потоковая обработка данных (без async)
+        for chunk in stream:
             part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
             if part:
                 response += part
