@@ -16,7 +16,7 @@ LAWYER_PHONE = "+7(999)916-04-83"
 
 # Создание экземпляра бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage()
+dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 
 # Подключение роутера
