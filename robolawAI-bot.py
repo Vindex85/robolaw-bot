@@ -1,7 +1,8 @@
-from aiogram import Dispatcher, Bot
-from aiogram.types import Message
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 import logging
+from aiogram import Bot, Dispatcher
+from aiogram.types import Message
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils import executor
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -13,6 +14,9 @@ LAWYER_PHONE = "+7(999)916-04-83"
 # Создание экземпляра бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(bot)
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
 
 # Подключение к базе данных PostgreSQL
 async def init_db():
@@ -104,7 +108,6 @@ async def handle_question(message: Message):
     # Отправляем ответ
     await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
 
+# Запуск бота
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    dp.middleware.setup(LoggingMiddleware())  # Логирование
-    dp.start_polling(skip_updates=True)  # Запуск polling
+    executor.start_polling(dp, skip_updates=True)
