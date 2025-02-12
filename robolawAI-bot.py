@@ -1,11 +1,10 @@
 import os
 import requests
-import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.utils import executor
 from dotenv import load_dotenv
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -20,7 +19,7 @@ LAWYER_PHONE = "+7(999)916-04-83"
 # Создание экземпляра бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
+dp.middleware.setup(LoggingMiddleware())  # Устанавливаем middleware для логирования
 
 # Подключение к базе данных PostgreSQL
 async def init_db():
