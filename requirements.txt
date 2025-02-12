@@ -1,4 +1,5 @@
 aiogram
 requests
+asyncpg
 python-dotenv
 pip==25.0.1
