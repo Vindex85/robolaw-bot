@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from aiogram import Router
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
@@ -15,7 +16,7 @@ LAWYER_PHONE = "+7(999)916-04-83"
 
 # Создание экземпляра бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
-dp = Dispatcher(bot=bot)
+dp = Dispatcher(storage=MemoryStorage()
 router = Router()
 
 # Подключение роутера
@@ -113,6 +114,8 @@ async def handle_question(message: Message):
     # Отправляем ответ
     await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
 
-# Запуск бота
-if __name__ == '__main__':
-    dp.run_polling()
+async def main():
+    await dp.start_polling(bot)  # Передаём bot
+
+if __name__ == "__main__":
+    asyncio.run(main())
