@@ -4,7 +4,7 @@ from aiogram import Router
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.filters import Text
+from aiogram.filters import Command, CommandStart
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -84,7 +84,7 @@ async def update_question_count(user_id: int, count: int):
     await conn.close()
 
 # Обработчик команды /start
-@router.message(commands=["start"])
+@router.message(CommandStart())
 async def send_welcome(message: Message):
     await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов).")
 
