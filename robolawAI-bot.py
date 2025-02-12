@@ -10,7 +10,6 @@ from aiogram.filters import CommandStart
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-ADMIN_IDS = {308383825, 321005569}
 LAWYER_PHONE = "+7(999)916-04-83"
 
 # Настройка логирования
@@ -47,7 +46,13 @@ def get_deepseek_response(prompt):
         json=data
     )
     
-    return response.json().get('choices', [{}])[0].get('message', {}).get('content', "Извините, произошла ошибка.")
+    print("DeepSeek API Response:", response.text)  # Выводим весь ответ от API
+    
+    try:
+        return response.json()['choices'][0]['message']['content']
+    except (KeyError, IndexError, TypeError) as e:
+        print("Ошибка парсинга ответа:", e)
+        return "Извините, произошла ошибка при обработке ответа от DeepSeek."
 
 # Обработчик команды /start
 @router.message(CommandStart())
