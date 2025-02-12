@@ -1,4 +1,4 @@
 aiogram
 asyncpg
 openai
-python-dotenv
+pip==25.0.1
