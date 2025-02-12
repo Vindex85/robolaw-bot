@@ -10,6 +10,7 @@ from aiogram.filters import CommandStart
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+ADMIN_IDS = {308383825, 321005569}
 LAWYER_PHONE = "+7(999)916-04-83"
 
 # Настройка логирования
