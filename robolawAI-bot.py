@@ -1,11 +1,11 @@
 import logging
 import os
+import requests
 import asyncio
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import CommandStart
-from openai import OpenAI
 
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -27,20 +27,61 @@ dp.include_router(router)
 # Хранилище количества вопросов
 user_question_count = {}
 
-# Создаем клиента для работы с Bothub API
-client = OpenAI(
-    api_key=BOTHUB_API_KEY,
-    base_url='https://bothub.chat/api/v2/openai/v1'
-)
+# Функция получения списка моделей
+def get_models():
+    url = "https://bothub.chat/api/v2/model/list?children=1"
+    headers = {
+        'Authorization': f'Bearer {BOTHUB_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        models = response.json()
+        print("Models:", models)  # Логируем модели
+        return models
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка при получении моделей: {e}")
+        return []
 
 # Функция запроса к Bothub API с использованием GPT-3.5-turbo
 def get_gpt_response(prompt):
+    # Получаем список доступных моделей
+    models = get_models()
+    if not models:
+        return "Извините, не удалось получить доступные модели."
+
+    # Находим модель GPT-3.5-turbo
+    gpt_model = next((model for model in models if model.get('name') == 'gpt-3.5-turbo'), None)
+    
+    if not gpt_model:
+        return "Извините, нужная модель не найдена."
+
+    headers = {
+        "Authorization": f"Bearer {BOTHUB_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "messages": [{"role": "user", "content": prompt}],
+        "model": "gpt-3.5-turbo"
+    }
+
     try:
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="gpt-3.5-turbo"
+        response = requests.post(
+            "https://bothub.chat/api/v2/openai/v1/chat/completions",  # URL для отправки запроса
+            headers=headers,
+            json=data
         )
-        return chat_completion['choices'][0]['message']['content']
+
+        # Логируем ответ
+        print("Status Code:", response.status_code)
+        print("Response Body:", response.text)
+
+        if response.status_code != 200:
+            return "Извините, произошла ошибка при обработке запроса к ИИ."
+
+        return response.json()['choices'][0]['message']['content']
     except Exception as e:
         print(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
