@@ -58,7 +58,7 @@ async def get_ai_response(question: str):
 
 @dp.message(Command("start"))
 async def start(message: Message):
-    await message.answer("Привет! Я юридический бот. Задайте мне ваш вопрос.")
+    await message.answer("Привет! Я Робот-юрист. Задайте мне ваш вопрос.")
 
 @dp.message()
 async def handle_question(message: Message):
@@ -75,12 +75,7 @@ async def handle_question(message: Message):
 
 async def main():
     await init_db()
-    await dp.start_polling(bot)
+    await dp.start_polling()  # Запуск polling без использования asyncio.run()
 
 if __name__ == "__main__":
-    # Здесь вызываем start_polling без использования asyncio.run(), так как aiogram сам управляет циклом событий
-<<<<<<< HEAD
-    asyncio.run(main())
-=======
-    asyncio.run(main())
->>>>>>> e85b2e1bfebe99538d6acce0eb88551b45d869f0
+    dp.run_polling(bot)  # Теперь запускаем polling напрямую
