@@ -1,7 +1,6 @@
 import os
 import logging
 import asyncio
-import requests
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart
@@ -33,25 +32,23 @@ client = OpenAI(
 )
 
 # Функция запроса к Bothub API
-def get_ai_response(prompt):
+async def get_ai_response(prompt):
     try:
-stream = client.chat.completions.create(
-    model="gpt-4o-mini-2024-07-18",
-    messages=[{"role": "user", "content": "Say this is a test"}],
-    stream=True,
-)
+        # Асинхронный запрос для генерации текста с потоком
+        stream = client.chat.completions.create(
+            model="gpt-4o-mini-2024-07-18",
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+        )
 
-for chunk in stream:
-    part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
-    if part:  # Если получен контент, печатаем его
-        print(part)
+        response = ""
+        # Потоковая обработка данных
+        async for chunk in stream:
+            part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
+            if part:
+                response += part
+        return response if response else "Извините, не удалось получить ответ от ИИ."
 
-        # Проверяем структуру ответа
-        if hasattr(chat_completion, "choices") and len(chat_completion.choices) > 0:
-            return chat_completion.choices[0].message.content
-        else:
-            return "Извините, произошла ошибка при обработке ответа от ИИ."
-    
     except Exception as e:
         logging.error(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
@@ -81,7 +78,7 @@ async def handle_question(message: Message):
 
     # Отправляем вопрос ИИ
     question = message.text
-    answer = get_ai_response(question)
+    answer = await get_ai_response(question)
 
     user_question_count[user_id] += 1  # Увеличиваем счетчик вопросов
 
