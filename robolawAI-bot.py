@@ -1,89 +1,71 @@
-import os
-import logging
-import asyncio
-import requests
-from aiogram import Bot, Dispatcher, Router, F
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.filters import CommandStart
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils import executor
+import logging
+import os
 from openai import OpenAI
+from dotenv import load_dotenv
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+load_dotenv()
 
-# Загружаем переменные окружения
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")  # Bothub API Key
-LAWYER_PHONE = "+7(999)916-04-83"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
 
-# Инициализация бота и диспетчера
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-router = Router()
-dp.include_router(router)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-# Лимит вопросов на одного пользователя
-user_question_count = {}
-
-# Инициализация OpenAI-клиента через Bothub API
 client = OpenAI(
     api_key=BOTHUB_API_KEY,
-    base_url="https://bothub.chat/api/v2/openai/v1"
+    base_url='https://bothub.chat/api/v2/openai/v1'
 )
 
-# Функция запроса к Bothub API
+user_question_count = {}
+MAX_QUESTIONS = 3
+
 def get_ai_response(prompt):
     try:
         chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="deepseek-r1-distill-llama-8b",
+            messages=[
+                {"role": "system", "content": "Ты - юридический помощник. Всегда отвечай на русском языке."},
+                {"role": "user", "content": prompt}
+            ],
+            model="gpt-4o-mini-2024-07-18",
         )
 
-        # Проверяем структуру ответа
+        logging.info(f"Ответ от API: {chat_completion}")
+
         if hasattr(chat_completion, "choices") and len(chat_completion.choices) > 0:
             return chat_completion.choices[0].message.content
         else:
             return "Извините, произошла ошибка при обработке ответа от ИИ."
-    
+
     except Exception as e:
         logging.error(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
 
-# Обработчик команды /start
-@router.message(CommandStart())
-async def send_welcome(message: Message):
+@dp.message(Command("start"))
+async def start_command(message: Message):
     user_question_count[message.from_user.id] = 0
-    await message.answer(
-        "Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов)."
-    )
+    await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов).")
 
-# Обработчик текстовых сообщений
-@router.message(F.text)
+@dp.message()
 async def handle_question(message: Message):
     user_id = message.from_user.id
-
-    # Проверяем, не превышен ли лимит вопросов
     if user_id not in user_question_count:
         user_question_count[user_id] = 0
 
-    if user_question_count[user_id] >= 3:
-        await message.answer(
-            f"Вы достигли лимита в 3 вопроса. Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}"
-        )
+    if user_question_count[user_id] >= MAX_QUESTIONS:
+        await message.answer("Вы исчерпали лимит вопросов. Если хотите узнать больше, позвоните юристу по номеру: +7(999)916-04-83")
         return
 
-    # Отправляем вопрос ИИ
     question = message.text
     answer = get_ai_response(question)
 
     user_question_count[user_id] += 1  # Увеличиваем счетчик вопросов
 
-    await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
-
-# Запуск бота
-async def main():
-    await dp.start_polling(bot)
+    await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    executor.start_polling(dp, skip_updates=True)
