@@ -79,4 +79,8 @@ async def main():
 
 if __name__ == "__main__":
     # Здесь вызываем start_polling без использования asyncio.run(), так как aiogram сам управляет циклом событий
+<<<<<<< HEAD
     asyncio.run(main())
+=======
+    asyncio.run(main())
+>>>>>>> e85b2e1bfebe99538d6acce0eb88551b45d869f0
