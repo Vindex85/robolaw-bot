@@ -1,7 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message
-from aiogram.utils import executor
+import asyncio
 import logging
 import os
 from openai import OpenAI
@@ -66,6 +66,8 @@ async def handle_question(message: Message):
 
     await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
+async def main():
+    await dp.start_polling()
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
