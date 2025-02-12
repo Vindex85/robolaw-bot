@@ -1,15 +1,15 @@
 import logging
 import os
-import requests
 import asyncio
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import CommandStart
+from openai import OpenAI
 
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")  # Новый ключ API для Bothub
 ADMIN_IDS = {308383825, 321005569}
 LAWYER_PHONE = "+7(999)916-04-83"
 
@@ -27,30 +27,22 @@ dp.include_router(router)
 # Хранилище количества вопросов
 user_question_count = {}
 
-# Функция запроса к OpenAI GPT-3.5-turbo API
+# Создаем клиента для работы с Bothub API
+client = OpenAI(
+    api_key=BOTHUB_API_KEY,
+    base_url='https://bothub.chat/api/v2/openai/v1'
+)
+
+# Функция запроса к Bothub API с использованием GPT-3.5-turbo
 def get_gpt_response(prompt):
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": "gpt-3.5-turbo",
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
-    response = requests.post(
-        "https://bothub.chat/api/v2/openai/v1",
-        headers=headers,
-        json=data
-    )
-
-    print("OpenAI API Response:", response.text)  # Выводим весь ответ от API
-
     try:
-        return response.json()['choices'][0]['message']['content']
-    except (KeyError, IndexError, TypeError) as e:
-        print("Ошибка парсинга ответа:", e)
+        chat_completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-3.5-turbo"
+        )
+        return chat_completion['choices'][0]['message']['content']
+    except Exception as e:
+        print(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
 
 # Обработчик команды /start
