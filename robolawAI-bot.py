@@ -9,7 +9,8 @@ from aiogram.filters import CommandStart
 
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ADMIN_IDS = {308383825, 321005569}
 LAWYER_PHONE = "+7(999)916-04-83"
 
 # Настройка логирования
@@ -26,33 +27,31 @@ dp.include_router(router)
 # Хранилище количества вопросов
 user_question_count = {}
 
-# Функция запроса к DeepSeek API
-def get_deepseek_response(prompt):
+# Функция запроса к OpenAI GPT-3.5-turbo API
+def get_gpt_response(prompt):
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json"
     }
     
     data = {
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
-        "model": "deepseek-chat"
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": prompt}]
     }
-    
+
     response = requests.post(
-        "https://api.deepseek.com/v1/chat/completions",
+        "https://bothub.chat/api/v2/openai/v1",
         headers=headers,
         json=data
     )
-    
-    print("DeepSeek API Response:", response.text)  # Выводим весь ответ от API
-    
+
+    print("OpenAI API Response:", response.text)  # Выводим весь ответ от API
+
     try:
         return response.json()['choices'][0]['message']['content']
     except (KeyError, IndexError, TypeError) as e:
         print("Ошибка парсинга ответа:", e)
-        return "Извините, произошла ошибка при обработке ответа от DeepSeek."
+        return "Извините, произошла ошибка при обработке ответа от ИИ."
 
 # Обработчик команды /start
 @router.message(CommandStart())
@@ -73,7 +72,7 @@ async def handle_question(message: Message):
         return
     
     question = message.text
-    answer = get_deepseek_response(question)
+    answer = get_gpt_response(question)
     
     user_question_count[user_id] += 1
     await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
