@@ -1,78 +1,116 @@
-import asyncio
-import logging
-import asyncpg
 import os
+import requests
+import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
-from aiogram.filters import Command
-from openai import OpenAI
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.utils import executor
+from dotenv import load_dotenv
 
-# Настройки
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# Загрузка переменных окружения
+load_dotenv()
+
+# Переменные окружения
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+HF_API_KEY = os.getenv("HF_API_KEY")  # API-ключ Hugging Face
 DATABASE_URL = os.getenv("DATABASE_URL")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ADMIN_IDS = {308383825, 321005569}  # ID администраторов
+ADMIN_IDS = {308383825, 321005569}
 LAWYER_PHONE = "+7(999)916-04-83"
 
-# Инициализация бота и базы данных
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Создание экземпляра бота и диспетчера
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
+# Подключение к базе данных PostgreSQL
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
+    return conn
+
+# Функция для отправки запроса к DeepSeek R1 (Hugging Face)
+def get_dialogpt_response(question: str):
+    url = "https://api-inference.huggingface.co/models/deepseek-ai/DeepSeek-R1"  # URL для модели DialoGPT
+
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "inputs": question
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()  # Проверка на ошибки
+        data = response.json()
+        return data[0]["generated_text"]
+    except requests.exceptions.RequestException as e:
+        return f"Ошибка при запросе к DeepSeek R1: {str(e)}"
+
+# Функция для сохранения статистики вопросов
+async def log_question(user_id: int, question: str, answer: str):
+    conn = await init_db()
     await conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            question_count INT DEFAULT 0
-        );
-    ''')
+        INSERT INTO questions(user_id, question, answer) VALUES($1, $2, $3)
+    ''', user_id, question, answer)
     await conn.close()
 
+# Функция для получения и обновления количества вопросов пользователя
 async def get_question_count(user_id: int):
-    conn = await asyncpg.connect(DATABASE_URL)
-    row = await conn.fetchrow("SELECT question_count FROM users WHERE user_id = $1", user_id)
-    await conn.close()
-    return row["question_count"] if row else 0
-
-async def update_question_count(user_id: int):
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute('''
-        INSERT INTO users (user_id, question_count) 
-        VALUES ($1, 1) 
-        ON CONFLICT (user_id) DO UPDATE 
-        SET question_count = users.question_count + 1;
+    conn = await init_db()
+    row = await conn.fetchrow('''
+        SELECT question_count FROM users WHERE user_id = $1
     ''', user_id)
+    
+    if row:
+        count = row['question_count']
+    else:
+        await conn.execute('''
+            INSERT INTO users(user_id, question_count) VALUES($1, 0)
+        ''', user_id)
+        count = 0
+
+    await conn.close()
+    return count
+
+async def update_question_count(user_id: int, count: int):
+    conn = await init_db()
+    await conn.execute('''
+        UPDATE users SET question_count = $1 WHERE user_id = $2
+    ''', count, user_id)
     await conn.close()
 
-async def get_ai_response(question: str):
-    response = client.completions.create(
-        model="gpt-3.5-turbo",
-        prompt=f"Юридический вопрос: {question}\nОтвет:",
-        max_tokens=200
-    )
-    return response.choices[0].text.strip()
+# Обработчик команды /start
+@dp.message_handler(commands=["start"])
+async def send_welcome(message: Message):
+    await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов).")
 
-@dp.message(Command("start"))
-async def start(message: Message):
-    await message.answer("Привет! Я Робот-юрист. Задайте мне ваш вопрос.")
-
-@dp.message()
+# Обработчик текстовых сообщений
+@dp.message_handler()
 async def handle_question(message: Message):
     user_id = message.from_user.id
-    question_count = await get_question_count(user_id)
+    question = message.text
 
-    if question_count >= 3:
-        await message.answer(f"Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
+    # Получаем количество вопросов пользователя
+    count = await get_question_count(user_id)
+
+    # Проверяем, не достиг ли пользователь лимита
+    if count >= 3:
+        await message.answer(f"Вы достигли лимита в 3 вопроса. Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
         return
 
-    answer = await get_ai_response(message.text)
-    await update_question_count(user_id)
+    # Генерация ответа с помощью DeepSeek
+    answer = get_deepseek_response(question)
+
+    # Логируем вопрос и ответ в базу данных
+    await log_question(user_id, question, answer)
+
+    # Обновляем счётчик вопросов пользователя
+    await update_question_count(user_id, count + 1)
+
+    # Отправляем ответ
     await message.answer(f"{answer}\n\nЕсли хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
 
-async def main():
-    await init_db()
-    await dp.start_polling()  # Запуск polling без использования asyncio.run()
-
-if __name__ == "__main__":
-    dp.run_polling(bot)  # Теперь запускаем polling напрямую
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
