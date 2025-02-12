@@ -1,5 +1,6 @@
 import logging
 import os
+from aiogram import Router
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -14,6 +15,10 @@ LAWYER_PHONE = "+7(999)916-04-83"
 # Создание экземпляра бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
+router = Router()
+
+# Подключение роутера
+dp.include_router(router)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -78,7 +83,7 @@ async def update_question_count(user_id: int, count: int):
     await conn.close()
 
 # Обработчик команды /start
-@dp.message_handler(commands=["start"])
+@router.message(commands=["start"])
 async def send_welcome(message: Message):
     await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов).")
 
