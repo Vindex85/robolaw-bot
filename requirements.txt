@@ -5,5 +5,5 @@ asyncpg
 python-dotenv
 pip==25.0.1
 flask
-quart==0.17
-werkzeug
+quart==0.18.4
+werkzeug==2.3.7
