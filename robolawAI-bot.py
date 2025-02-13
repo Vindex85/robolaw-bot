@@ -102,7 +102,7 @@ async def webhook():
         update = Update(**data)  # Создаём объект Update
 
         # Новый способ обработки обновлений в aiogram 3.x
-        await dp.process_update(update)
+        await dp.feed_update(update)
 
         return "OK", 200
     except Exception as e:
