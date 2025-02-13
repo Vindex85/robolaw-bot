@@ -94,15 +94,14 @@ async def handle_question(message: Message):
     user_question_count[user_id] += 1
     await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
-# Webhook-обработчик Quart
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     try:
-        data = await request.get_json()  # Получаем данные от Telegram
-        update = Update(**data)  # Создаём объект Update
+        data = await request.get_json()
+        update = Update.model_validate(data)  # Правильный способ создания объекта Update в aiogram 3.x
 
-        # Новый способ обработки обновлений в aiogram 3.x
-        await dp.feed_update(update)
+        # Правильный вызов метода
+        await dp.feed_update(bot=bot, update=update)
 
         return "OK", 200
     except Exception as e:
