@@ -78,7 +78,7 @@ async def handle_question(message: Message):
 
     # Отправляем вопрос ИИ
     question = message.text
-    answer = await get_ai_response(question)
+    answer = get_ai_response(question)  # Убрали await
 
     user_question_count[user_id] += 1  # Увеличиваем счетчик вопросов
 
