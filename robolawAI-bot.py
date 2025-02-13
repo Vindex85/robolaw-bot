@@ -14,6 +14,7 @@ logging.basicConfig(level=logging.INFO)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")  # Bothub API Key
 LAWYER_PHONE = "+7(999)916-04-83"
+ADMIN_IDS = [308383825, 321005569]
 
 # Инициализация бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -36,13 +37,13 @@ def get_ai_response(prompt):
     try:
         # Синхронный запрос для генерации текста с потоком
         stream = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o-mini-2024-07-18",
             messages=[{"role": "user", "content": prompt}],
             stream=True,
         )
 
         response = ""
-        # Потоковая обработка данных (без async)
+        # Потоковая обработка данных
         for chunk in stream:
             part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
             if part:
@@ -53,12 +54,20 @@ def get_ai_response(prompt):
         logging.error(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
 
+# Функция отправки сообщений администраторам
+async def notify_admins(message: Message):
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, f"Новый вопрос от пользователя @{message.from_user.username} (ID: {message.from_user.id}):\n\n{message.text}")
+        except Exception as e:
+            logging.error(f"Ошибка при отправке сообщения админу {admin_id}: {e}")
+
 # Обработчик команды /start
 @router.message(CommandStart())
 async def send_welcome(message: Message):
     user_question_count[message.from_user.id] = 0
     await message.answer(
-        "Привет! Я Робот-Юрист, задайте мне свой юридический вопрос (Вы можете задать до 3 вопросов)."
+        "Привет! Я Робот-Юрист, задайте мне свой юридический вопрос."
     )
 
 # Обработчик текстовых сообщений
@@ -78,7 +87,10 @@ async def handle_question(message: Message):
 
     # Отправляем вопрос ИИ
     question = message.text
-    answer = get_ai_response(question)  # Убрали await
+    answer = get_ai_response(question)
+
+    # Уведомляем администраторов
+    await notify_admins(message)
 
     user_question_count[user_id] += 1  # Увеличиваем счетчик вопросов
 
