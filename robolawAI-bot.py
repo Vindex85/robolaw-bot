@@ -36,7 +36,7 @@ def get_ai_response(prompt):
     try:
         # Синхронный запрос для генерации текста с потоком
         stream = client.chat.completions.create(
-            model="gpt-4o-mini-2024-07-18",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             stream=True,
         )
