@@ -94,16 +94,16 @@ async def handle_question(message: Message):
     user_question_count[user_id] += 1
     await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
-# Webhook-обработчик
+# Webhook-обработчик Quart
 @app.route("/webhook", methods=["POST"])
 async def webhook():
     try:
         data = await request.get_json()  # Получаем данные от Telegram
         update = Update(**data)  # Создаём объект Update
 
-        # 📌 Новый способ обработки обновлений в aiogram 3.x
-        await dp._update_listener.notify(update)
-        
+        # Новый способ обработки обновлений в aiogram 3.x
+        await dp.process_update(update)
+
         return "OK", 200
     except Exception as e:
         logging.error(f"Ошибка в webhook: {e}")
