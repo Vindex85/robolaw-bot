@@ -3,10 +3,11 @@ import os
 import logging
 import asyncio
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message
+from aiogram.types import Message, Update
 from aiogram.filters import CommandStart
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
+from quart import Quart, request
 
 load_dotenv()
 
@@ -16,6 +17,8 @@ logging.basicConfig(level=logging.INFO)
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")  # Bothub API Key
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")  # URL вебхука
+PORT = int(os.getenv("PORT", 10000))  # Порт для Render
 LAWYER_PHONE = "+7(999)916-04-83"
 ADMIN_IDS = [308383825, 321005569]
 
@@ -41,7 +44,6 @@ client = OpenAI(
 # Функция запроса к Bothub API
 def get_ai_response(prompt):
     try:
-        # Синхронный запрос для генерации текста с потоком
         stream = client.chat.completions.create(
             model="gpt-4o-mini-2024-07-18",
             messages=[{"role": "user", "content": prompt}],
@@ -49,7 +51,6 @@ def get_ai_response(prompt):
         )
 
         response = ""
-        # Потоковая обработка данных
         for chunk in stream:
             part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
             if part:
@@ -72,9 +73,7 @@ async def notify_admins(message: Message):
 @router.message(CommandStart())
 async def send_welcome(message: Message):
     user_question_count[message.from_user.id] = 0
-    await message.answer(
-        "Привет! Я Робот-Юрист, задайте мне свой юридический вопрос."
-    )
+    await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос.")
 
 # Обработчик текстовых сообщений
 @router.message(F.text)
@@ -82,7 +81,6 @@ async def handle_question(message: Message):
     await message.answer("Ваш вопрос обрабатывается...")
     user_id = message.from_user.id
 
-    # Проверяем, не превышен ли лимит вопросов
     if user_id not in user_question_count:
         user_question_count[user_id] = 0
 
@@ -92,20 +90,40 @@ async def handle_question(message: Message):
         )
         return
 
-    # Отправляем вопрос ИИ
     question = message.text
     answer = get_ai_response(question)
 
-    # Уведомляем администраторов
     await notify_admins(message)
-
-    user_question_count[user_id] += 1  # Увеличиваем счетчик вопросов
+    user_question_count[user_id] += 1  
 
     await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
-# Запуск бота
+# Настройка веб-сервера на Quart для обработки вебхуков
+app = Quart(__name__)
+
+@app.route("/", methods=["GET"])
+async def home():
+    return "Бот работает!", 200
+
+@app.route("/webhook", methods=["POST"])
+async def webhook():
+    try:
+        update = Update.model_validate(await request.json)
+        await dp.feed_update(bot, update)
+        return "OK", 200
+    except Exception as e:
+        logging.error(f"Ошибка в webhook: {e}")
+        return "Error", 500
+
+# Установка Webhook
+async def set_webhook():
+    await bot.set_webhook(WEBHOOK_URL)
+
+# Запуск бота с Webhook
 async def main():
-    await dp.start_polling(bot)
+    await set_webhook()  # Устанавливаем Webhook перед запуском
+    logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
+    await app.run_task(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     asyncio.run(main())
