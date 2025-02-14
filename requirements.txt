@@ -6,4 +6,6 @@ python-dotenv
 pip==25.0.1
 quart==0.19.4
 hypercorn==0.14.4
+httpx==0.27.0
+
 
