@@ -16,9 +16,9 @@ logging.basicConfig(level=logging.INFO)
 
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")  # Bothub API Key
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")  # URL вебхука
-PORT = int(os.getenv("PORT", 10000))  # Порт для Render
+BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")
+PORT = int(os.getenv("PORT", 10000))
 LAWYER_PHONE = "+7(999)916-04-83"
 ADMIN_IDS = [308383825, 321005569]
 
@@ -45,8 +45,14 @@ client = OpenAI(
 def get_ai_response(prompt):
     try:
         stream = client.chat.completions.create(
-            model="gpt-4o-mini-2024-07-18",
-            messages=[{"role": "user", "content": prompt}],
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Ты — профессиональный юридический консультант. Отвечай точно, понятно и профессионально, избегая неформального тона и юмора. Основывайся на общих принципах права, если конкретные законы не указаны пользователем. Всегда уточняй, что предоставляемая информация носит ознакомительный характер и не заменяет консультацию квалифицированного юриста. Если вопрос выходит за рамки твоих знаний, скажи об этом честно."},
+                {"role": "user", "content": "Как вернуть некачественный товар?"}
+            ],
+            temperature=0.4,
+            max_tokens=500,
+            top_p=0.9,
             stream=True,
         )
 
@@ -56,18 +62,9 @@ def get_ai_response(prompt):
             if part:
                 response += part
         return response if response else "Извините, не удалось получить ответ от ИИ."
-
     except Exception as e:
         logging.error(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
-
-# Функция отправки сообщений администраторам
-async def notify_admins(message: Message):
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, f"Новый вопрос от пользователя @{message.from_user.username} (ID: {message.from_user.id}):\n\n{message.text}")
-        except Exception as e:
-            logging.error(f"Ошибка при отправке сообщения админу {admin_id}: {e}")
 
 # Обработчик команды /start
 @router.message(CommandStart())
@@ -80,30 +77,23 @@ async def send_welcome(message: Message):
 async def handle_question(message: Message):
     await message.answer("Ваш вопрос обрабатывается...")
     user_id = message.from_user.id
-
     if user_id not in user_question_count:
         user_question_count[user_id] = 0
-
     if user_question_count[user_id] >= 3:
         await message.answer(
             f"Вы достигли лимита в 3 вопроса. Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}"
         )
         return
-
     question = message.text
     answer = get_ai_response(question)
-
-    await notify_admins(message)
-    user_question_count[user_id] += 1  
-
     await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
 
 # Настройка веб-сервера на Quart для обработки вебхуков
 app = Quart(__name__)
 
-@app.route("/", methods=["GET"])
-async def home():
-    return "Бот работает!", 200
+@app.route("/ping", methods=["GET"])
+async def ping():
+    return {"status": "pong"}, 200
 
 @app.route("/webhook", methods=["POST"])
 async def webhook():
@@ -121,7 +111,7 @@ async def set_webhook():
 
 # Запуск бота с Webhook
 async def main():
-    await set_webhook()  # Устанавливаем Webhook перед запуском
+    await set_webhook()
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
 
