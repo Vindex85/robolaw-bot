@@ -21,7 +21,7 @@ BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")  # Строка подключения к PostgreSQL
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
-LAWYER_PHONE = "+7(999)916-04-83")
+LAWYER_PHONE = "+7(999)916-04-83"
 ADMIN_IDS = [308383825, 321005569]
 
 if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY or not DATABASE_URL:
