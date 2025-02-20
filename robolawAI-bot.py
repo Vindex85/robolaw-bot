@@ -21,7 +21,7 @@ BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://robolaw-bot.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
-LAWYER_PHONE = "+79999160483"  # Исправлен формат номера
+LAWYER_PHONE = "+79999160483"
 ADMIN_IDS = [308383825, 321005569]
 
 if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY or not DATABASE_URL:
@@ -94,7 +94,7 @@ def get_ai_response(prompt):
 @router.message(CommandStart())
 async def send_welcome(message: Message):
     user_id = message.from_user.id
-    await set_user_question_count(user_id, 0)  # Сбрасываем лимит при /start
+    await set_user_question_count(user_id, 0)
     await message.answer("Привет! Я Робот-Юрист. Задайте мне свой юридический вопрос.")
 
 # Обработчик команды /help
@@ -124,22 +124,28 @@ async def handle_question(message: Message):
     logging.info(f"Response to {user_id}: {answer}")
 
     # Создаём клавиатуру
+    phone_url = "tel:+79999160483"
+    logging.info(f"Generated phone URL: {phone_url}")  # Логируем URL для проверки
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Задать ещё вопрос", callback_data="ask_again")],
         [InlineKeyboardButton(text="Уточнить", callback_data="clarify")],
-        [InlineKeyboardButton(text="Позвонить юристу", url="tel:+79999160483")],  # Исправлен URL
+        [InlineKeyboardButton(text="Позвонить юристу", url=phone_url)],
     ])
     
     # Отправляем ответ и увеличиваем счётчик только при успехе
     try:
         await message.answer(
-            f"{answer}\n\nОсталось вопросов: {3 - (count + 1)}.",
+            f"{answer}\n\nОсталось вопросов: {3 - (count + 1)}. Звоните: {LAWYER_PHONE}",
             reply_markup=keyboard
         )
-        await set_user_question_count(user_id, count + 1)  # Увеличиваем только после успешной отправки
+        await set_user_question_count(user_id, count + 1)
     except Exception as e:
         logging.error(f"Ошибка при отправке ответа: {e}")
-        await message.answer("Произошла ошибка. Попробуйте позже.")
+        # Если кнопка не работает, отправляем без неё
+        await message.answer(
+            f"{answer}\n\nОсталось вопросов: {3 - (count + 1)}. Звоните: {LAWYER_PHONE}"
+        )
+        await set_user_question_count(user_id, count + 1)
 
 # Обработчик кнопки "Задать ещё"
 @router.callback_query(F.data == "ask_again")
