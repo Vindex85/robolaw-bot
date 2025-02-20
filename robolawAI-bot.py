@@ -4,7 +4,7 @@ import logging
 import asyncio
 import asyncpg
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery  # Добавлен CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
