@@ -4,7 +4,7 @@ import logging
 import asyncio
 import asyncpg
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery  # Добавлен CallbackQuery
+from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
@@ -18,10 +18,10 @@ logging.basicConfig(level=logging.INFO)
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
-DATABASE_URL = os.getenv("DATABASE_URL")  # Строка подключения к PostgreSQL
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")
+DATABASE_URL = os.getenv("DATABASE_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://robolaw-bot.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
-LAWYER_PHONE = "+7(999)916-04-83"
+LAWYER_PHONE = "+79999160483"  # Исправлен формат номера
 ADMIN_IDS = [308383825, 321005569]
 
 if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY or not DATABASE_URL:
@@ -76,7 +76,7 @@ def get_ai_response(prompt):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.4,
-            max_tokens=200,  # Уменьшено для краткости
+            max_tokens=200,
             top_p=0.9,
             stream=True,
         )
@@ -102,38 +102,44 @@ async def send_welcome(message: Message):
 async def send_help(message: Message):
     await message.answer(
         "Я — Робот-Юрист. Задавайте юридические вопросы, и я отвечу профессионально. "
-        f"Лимит — 3 вопроса. Для сложных случаев звоните: {LAWYER_PHONE}"
+        f"Хотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}"
     )
 
 # Обработчик текстовых сообщений
 @router.message(F.text)
 async def handle_question(message: Message):
     user_id = message.from_user.id
-    if not message.text.strip():  # Проверка на пустое сообщение
+    if not message.text.strip():
         await message.answer("Пожалуйста, задайте вопрос текстом.")
         return
 
     count = await get_user_question_count(user_id)
     if count >= 3:
-        await message.answer(f"Лимит 3 вопроса исчерпан. Звоните юристу: {LAWYER_PHONE}")
+        await message.answer(f"Вы достигли лимита в 3 вопроса. Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}")
         return
 
     question = message.text
     logging.info(f"User {user_id} asked: {question}")
     answer = get_ai_response(question)
-    await set_user_question_count(user_id, count + 1)
     logging.info(f"Response to {user_id}: {answer}")
 
     # Создаём клавиатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Задать ещё вопрос", callback_data="ask_again")],
         [InlineKeyboardButton(text="Уточнить", callback_data="clarify")],
-        [InlineKeyboardButton(text="Позвонить юристу", url=f"tel:{LAWYER_PHONE}")],
+        [InlineKeyboardButton(text="Позвонить юристу", url="tel:+79999160483")],  # Исправлен URL
     ])
-    await message.answer(
-        f"{answer}\n\nОсталось вопросов: {3 - (count + 1)}.",
-        reply_markup=keyboard
-    )
+    
+    # Отправляем ответ и увеличиваем счётчик только при успехе
+    try:
+        await message.answer(
+            f"{answer}\n\nОсталось вопросов: {3 - (count + 1)}.",
+            reply_markup=keyboard
+        )
+        await set_user_question_count(user_id, count + 1)  # Увеличиваем только после успешной отправки
+    except Exception as e:
+        logging.error(f"Ошибка при отправке ответа: {e}")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
 
 # Обработчик кнопки "Задать ещё"
 @router.callback_query(F.data == "ask_again")
@@ -170,7 +176,7 @@ async def set_webhook():
 
 # Запуск бота с Webhook
 async def main():
-    await init_db()  # Инициализация таблицы в PostgreSQL
+    await init_db()
     await set_webhook()
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
