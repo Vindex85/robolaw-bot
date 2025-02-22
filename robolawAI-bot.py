@@ -21,7 +21,7 @@ BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://robolaw-bot.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
-LAWYER_PHONE = "+7(999)916-04-83"
+LAWYER_PHONE = "+79999160483"
 ADMIN_IDS = [int(admin_id) for admin_id in os.getenv("ADMIN_IDS", "308383825,321005569").split(",")]
 
 if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY or not DATABASE_URL:
@@ -149,7 +149,7 @@ async def handle_question(message: Message):
     answer = get_ai_response(question)
     logging.info(f"Response to {user_id}: {answer}")
 
-    # Создаём клавиатуру без кнопки "Позвонить юристу"
+    # Создаём клавиатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Задать ещё вопрос", callback_data="ask_again")],
         [InlineKeyboardButton(text="Уточнить", callback_data="clarify")],
@@ -162,17 +162,24 @@ async def handle_question(message: Message):
     )
     await set_user_question_count(user_id, count + 1)
 
-# Обработчик кнопки "Задать ещё"
-@router.callback_query(F.data == "ask_again")
-async def process_ask_again(callback: CallbackQuery):
-    await callback.message.edit_text("Задайте новый вопрос:")
-    await callback.answer()
-
-# Обработчик кнопки "Уточнить"
-@router.callback_query(F.data == "clarify")
-async def process_clarify(callback: CallbackQuery):
-    await callback.message.edit_text("Пожалуйста, уточните ваш вопрос:")
-    await callback.answer()
+# Обработчик всех callback-запросов для отладки
+@router.callback_query()
+async def process_callback(callback: CallbackQuery):
+    logging.info(f"Callback received: {callback.data} from user {callback.from_user.id}")
+    if callback.data == "ask_again":
+        try:
+            await callback.message.edit_text("Задайте новый вопрос:")
+            await callback.answer()
+        except Exception as e:
+            logging.error(f"Ошибка в ask_again: {e}")
+    elif callback.data == "clarify":
+        try:
+            await callback.message.edit_text("Пожалуйста, уточните ваш вопрос:")
+            await callback.answer()
+        except Exception as e:
+            logging.error(f"Ошибка в clarify: {e}")
+    else:
+        logging.info(f"Неизвестный callback: {callback.data}")
 
 # Настройка веб-сервера на Quart для обработки вебхуков
 app = Quart(__name__)
@@ -185,11 +192,17 @@ async def ping():
 async def webhook():
     try:
         update = Update.model_validate(await request.json)
+        logging.info(f"Received update: {update.update_id}, type: {update.__dict__}")
         await dp.feed_update(bot, update)
         return "OK", 200
     except Exception as e:
         logging.error(f"Ошибка в webhook: {e}")
         return "Error", 500
+
+# Проверка текущего вебхука при запуске
+async def check_webhook():
+    webhook_info = await bot.get_webhook_info()
+    logging.info(f"Webhook info: {webhook_info}")
 
 # Установка Webhook
 async def set_webhook():
@@ -199,6 +212,7 @@ async def set_webhook():
 async def main():
     await init_db()
     await set_webhook()
+    await check_webhook()  # Проверяем текущий вебхук
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
 
