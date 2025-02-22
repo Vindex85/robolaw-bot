@@ -204,15 +204,16 @@ async def check_webhook():
     webhook_info = await bot.get_webhook_info()
     logging.info(f"Webhook info: {webhook_info}")
 
-# Установка Webhook
+# Установка Webhook с явным указанием типов обновлений
 async def set_webhook():
-    await bot.set_webhook(WEBHOOK_URL)
+    await bot.set_webhook(WEBHOOK_URL, allowed_updates=["message", "callback_query"])
+    logging.info("Webhook установлен с allowed_updates=['message', 'callback_query']")
 
 # Запуск бота с Webhook
 async def main():
     await init_db()
     await set_webhook()
-    await check_webhook()  # Проверяем текущий вебхук
+    await check_webhook()
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
 
