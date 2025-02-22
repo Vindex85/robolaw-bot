@@ -2,9 +2,10 @@ from dotenv import load_dotenv
 import os
 import logging
 import asyncio
+import asyncpg
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, Update
-from aiogram.filters import CommandStart
+from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import OpenAI
 from quart import Quart, request
@@ -17,13 +18,14 @@ logging.basicConfig(level=logging.INFO)
 # Загружаем переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 BOTHUB_API_KEY = os.getenv("BOTHUB_API_KEY")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-name.onrender.com/webhook")
+DATABASE_URL = os.getenv("DATABASE_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://robolaw-bot.onrender.com/webhook")
 PORT = int(os.getenv("PORT", 10000))
-LAWYER_PHONE = "+7(999)916-04-83"
-ADMIN_IDS = [308383825, 321005569]
+LAWYER_PHONE = "+79999160483"
+ADMIN_IDS = [308383825, 321005569]  # ID админов
 
-if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY:
-    raise ValueError("Ошибка: TELEGRAM_BOT_TOKEN или BOTHUB_API_KEY не найдены в .env")
+if not TELEGRAM_BOT_TOKEN or not BOTHUB_API_KEY or not DATABASE_URL:
+    raise ValueError("Ошибка: TELEGRAM_BOT_TOKEN, BOTHUB_API_KEY или DATABASE_URL не найдены в .env")
 
 # Инициализация бота и диспетчера
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -32,14 +34,37 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-# Лимит вопросов на одного пользователя
-user_question_count = {}
-
 # Инициализация OpenAI-клиента через Bothub API
 client = OpenAI(
     api_key=BOTHUB_API_KEY,
     base_url="https://bothub.chat/api/v2/openai/v1"
 )
+
+# Функции для работы с PostgreSQL
+async def init_db():
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute('''
+        CREATE TABLE IF NOT EXISTS user_limits (
+            user_id BIGINT PRIMARY KEY,
+            question_count INTEGER DEFAULT 0
+        )
+    ''')
+    await conn.close()
+
+async def get_user_question_count(user_id):
+    conn = await asyncpg.connect(DATABASE_URL)
+    count = await conn.fetchval('SELECT question_count FROM user_limits WHERE user_id = $1', user_id)
+    await conn.close()
+    return count if count is not None else 0
+
+async def set_user_question_count(user_id, count):
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute(
+        'INSERT INTO user_limits (user_id, question_count) VALUES ($1, $2) '
+        'ON CONFLICT (user_id) DO UPDATE SET question_count = $2',
+        user_id, count
+    )
+    await conn.close()
 
 # Функция запроса к Bothub API
 def get_ai_response(prompt):
@@ -51,11 +76,10 @@ def get_ai_response(prompt):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.4,
-            max_tokens=300,
+            max_tokens=200,
             top_p=0.9,
             stream=True,
         )
-
         response = ""
         for chunk in stream:
             part = chunk.to_dict()['choices'][0]['delta'].get('content', None)
@@ -66,27 +90,99 @@ def get_ai_response(prompt):
         logging.error(f"Ошибка при запросе к Bothub API: {e}")
         return "Извините, произошла ошибка при обработке ответа от ИИ."
 
+# Функция отправки вопроса админам
+async def notify_admins(user_id, username, phone_number, question):
+    for admin_id in ADMIN_IDS:
+        try:
+            phone_info = f"Телефон: {phone_number}" if phone_number else "Телефон: не указан"
+            await bot.send_message(
+                admin_id,
+                f"Новый вопрос от пользователя:\n"
+                f"ID: {user_id}\n"
+                f"Ник: @{username if username else 'нет ника'}\n"
+                f"{phone_info}\n"
+                f"Вопрос: {question}"
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при отправке сообщения админу {admin_id}: {e}")
+
 # Обработчик команды /start
 @router.message(CommandStart())
 async def send_welcome(message: Message):
-    user_question_count[message.from_user.id] = 0
-    await message.answer("Привет! Я Робот-Юрист, задайте мне свой юридический вопрос.")
+    user_id = message.from_user.id
+    await set_user_question_count(user_id, 0)
+    await message.answer("Привет! Я Робот-Юрист. Задайте мне свой юридический вопрос.")
+
+# Обработчик команды /help
+@router.message(Command("help"))
+async def send_help(message: Message):
+    await message.answer(
+        "Я — Робот-Юрист. Задавайте юридические вопросы, и я отвечу профессионально. "
+        f"Лимит — 3 вопроса. Для сложных случаев звоните: {LAWYER_PHONE}"
+    )
 
 # Обработчик текстовых сообщений
 @router.message(F.text)
 async def handle_question(message: Message):
-    await message.answer("Ваш вопрос обрабатывается...")
     user_id = message.from_user.id
-    if user_id not in user_question_count:
-        user_question_count[user_id] = 0
-    if user_question_count[user_id] >= 3:
-        await message.answer(
-            f"Вы достигли лимита в 3 вопроса. Если хотите узнать больше, позвоните юристу по номеру: {LAWYER_PHONE}"
-        )
+    if not message.text.strip():
+        await message.answer("Пожалуйста, задайте вопрос текстом.")
         return
+
+    count = await get_user_question_count(user_id)
+    if count >= 3:
+        await message.answer(f"Лимит в 3 вопроса достигнут. Если хотите узань больше, позвоните или напишите юристу: {LAWYER_PHONE}")
+        return
+
+    # Уведомление пользователю
+    await message.answer("Ваш вопрос обрабатывается...")
+
     question = message.text
+    username = message.from_user.username
+    phone_number = message.from_user.phone_number if hasattr(message.from_user, 'phone_number') else None
+    logging.info(f"User {user_id} asked: {question}")
+
+    # Отправляем вопрос админам
+    await notify_admins(user_id, username, phone_number, question)
+
+    # Получаем ответ от ИИ
     answer = get_ai_response(question)
-    await message.answer(f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}")
+    logging.info(f"Response to {user_id}: {answer}")
+
+    # Создаём клавиатуру
+    phone_url = "tel:+79999160483"
+    logging.info(f"Generated phone URL: {phone_url}")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Задать ещё вопрос", callback_data="ask_again")],
+        [InlineKeyboardButton(text="Уточнить", callback_data="clarify")],
+        [InlineKeyboardButton(text="Позвонить юристу", url=phone_url)],
+    ])
+    
+    # Отправляем ответ и увеличиваем счётчик только при успехе
+    try:
+        await message.answer(
+            f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}",
+            reply_markup=keyboard
+        )
+        await set_user_question_count(user_id, count + 1)
+    except Exception as e:
+        logging.error(f"Ошибка при отправке ответа: {e}")
+        await message.answer(
+            f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}"
+        )
+        await set_user_question_count(user_id, count + 1)
+
+# Обработчик кнопки "Задать ещё"
+@router.callback_query(F.data == "ask_again")
+async def process_ask_again(callback: CallbackQuery):
+    await callback.message.edit_text("Задайте новый вопрос:")
+    await callback.answer()
+
+# Обработчик кнопки "Уточнить"
+@router.callback_query(F.data == "clarify")
+async def process_clarify(callback: CallbackQuery):
+    await callback.message.edit_text("Пожалуйста, уточните ваш вопрос:")
+    await callback.answer()
 
 # Настройка веб-сервера на Quart для обработки вебхуков
 app = Quart(__name__)
@@ -111,6 +207,7 @@ async def set_webhook():
 
 # Запуск бота с Webhook
 async def main():
+    await init_db()
     await set_webhook()
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
