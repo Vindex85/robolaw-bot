@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, Update, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
 from openai import OpenAI
 from quart import Quart, request
 
@@ -66,15 +67,12 @@ async def set_user_question_count(user_id, count):
     )
     await conn.close()
 
-# Функция запроса к Bothub API
-def get_ai_response(prompt):
+# Функция запроса к Bothub API с учётом контекста
+def get_ai_response(messages):
     try:
         stream = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Ты — юридический консультант. Отвечай кратко, чётко и профессионально. Давай только общую информацию, если нет конкретных деталей, и напоминай, что это не заменяет консультацию юриста."},
-                {"role": "user", "content": prompt}
-            ],
+            messages=messages,
             temperature=0.4,
             max_tokens=300,
             top_p=0.9,
@@ -108,9 +106,10 @@ async def notify_admins(user_id, username, phone_number, question):
 
 # Обработчик команды /start
 @router.message(CommandStart())
-async def send_welcome(message: Message):
+async def send_welcome(message: Message, state: FSMContext):
     user_id = message.from_user.id
     await set_user_question_count(user_id, 0)
+    await state.clear()  # Очищаем контекст при старте
     await message.answer("Привет! Я Робот-Юрист. Задайте мне свой юридический вопрос.")
 
 # Обработчик команды /help
@@ -123,7 +122,7 @@ async def send_help(message: Message):
 
 # Обработчик текстовых сообщений
 @router.message(F.text)
-async def handle_question(message: Message):
+async def handle_question(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if not message.text.strip():
         await message.answer("Пожалуйста, задайте вопрос текстом.")
@@ -134,7 +133,6 @@ async def handle_question(message: Message):
         await message.answer(f"Лимит 3 вопроса достигнут. Если хотите узнать больше, позвоните или напишите юристу: {LAWYER_PHONE}")
         return
 
-    # Уведомление пользователю
     await message.answer("Ваш вопрос обрабатывается...")
 
     question = message.text
@@ -142,44 +140,46 @@ async def handle_question(message: Message):
     phone_number = message.from_user.phone_number if hasattr(message.from_user, 'phone_number') else None
     logging.info(f"User {user_id} asked: {question}")
 
-    # Отправляем вопрос админам
     await notify_admins(user_id, username, phone_number, question)
 
-    # Получаем ответ от ИИ
-    answer = get_ai_response(question)
+    # Получаем текущий контекст из состояния
+    data = await state.get_data()
+    history = data.get("history", [
+        {"role": "system", "content": "Ты — юридический консультант. Отвечай кратко, чётко и профессионально. Давай только общую информацию, если нет конкретных деталей, и напоминай, что это не заменяет консультацию юриста."}
+    ])
+
+    # Добавляем новый вопрос в историю
+    history.append({"role": "user", "content": question})
+    answer = get_ai_response(history)
+    history.append({"role": "assistant", "content": answer})
+
+    # Сохраняем обновлённую историю
+    await state.set_data({"history": history})
     logging.info(f"Response to {user_id}: {answer}")
 
-    # Создаём клавиатуру
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Задать ещё вопрос", callback_data="ask_again")],
         [InlineKeyboardButton(text="Уточнить", callback_data="clarify")],
     ])
     
-    # Отправляем ответ и увеличиваем счётчик
     await message.answer(
         f"{answer}\n\nХотите узнать больше? Позвоните юристу по номеру: {LAWYER_PHONE}",
         reply_markup=keyboard
     )
     await set_user_question_count(user_id, count + 1)
 
-# Обработчик всех callback-запросов для отладки
-@router.callback_query()
-async def process_callback(callback: CallbackQuery):
-    logging.info(f"Callback received: {callback.data} from user {callback.from_user.id}")
-    if callback.data == "ask_again":
-        try:
-            await callback.message.edit_text("Задайте новый вопрос:")
-            await callback.answer()
-        except Exception as e:
-            logging.error(f"Ошибка в ask_again: {e}")
-    elif callback.data == "clarify":
-        try:
-            await callback.message.edit_text("Пожалуйста, уточните ваш вопрос:")
-            await callback.answer()
-        except Exception as e:
-            logging.error(f"Ошибка в clarify: {e}")
-    else:
-        logging.info(f"Неизвестный callback: {callback.data}")
+# Обработчик "Задать ещё вопрос"
+@router.callback_query(F.data == "ask_again")
+async def process_ask_again(callback: CallbackQuery, state: FSMContext):
+    await state.clear()  # Очищаем историю для нового вопроса
+    await callback.message.edit_text("Задайте новый вопрос:")
+    await callback.answer()
+
+# Обработчик "Уточнить"
+@router.callback_query(F.data == "clarify")
+async def process_clarify(callback: CallbackQuery):
+    await callback.message.edit_text("Пожалуйста, уточните ваш вопрос:")
+    await callback.answer()
 
 # Настройка веб-сервера на Quart для обработки вебхуков
 app = Quart(__name__)
@@ -192,28 +192,20 @@ async def ping():
 async def webhook():
     try:
         update = Update.model_validate(await request.json)
-        logging.info(f"Received update: {update.update_id}, type: {update.__dict__}")
         await dp.feed_update(bot, update)
         return "OK", 200
     except Exception as e:
         logging.error(f"Ошибка в webhook: {e}")
         return "Error", 500
 
-# Проверка текущего вебхука при запуске
-async def check_webhook():
-    webhook_info = await bot.get_webhook_info()
-    logging.info(f"Webhook info: {webhook_info}")
-
 # Установка Webhook с явным указанием типов обновлений
 async def set_webhook():
     await bot.set_webhook(WEBHOOK_URL, allowed_updates=["message", "callback_query"])
-    logging.info("Webhook установлен с allowed_updates=['message', 'callback_query']")
 
 # Запуск бота с Webhook
 async def main():
     await init_db()
     await set_webhook()
-    await check_webhook()
     logging.info(f"✅ Webhook установлен на {WEBHOOK_URL}")
     await app.run_task(host="0.0.0.0", port=PORT)
 
